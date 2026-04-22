@@ -4,6 +4,7 @@ import 'widgets/brand_header.dart';
 import 'theme/app_colors.dart';
 import 'widgets/bottom_nav_bar.dart';
 import 'screens/splash_screen.dart';
+import 'screens/login_screen.dart';
 import 'screens/onboarding_screen.dart';
 import 'screens/discovery_screen.dart';
 import 'screens/chat_screen.dart';
@@ -69,7 +70,12 @@ class _AppFlowControllerState extends State<AppFlowController> {
     switch (_flow) {
       case AppFlow.splash:
         return SplashScreen(
-          onComplete: () => setState(() => _flow = AppFlow.onboarding),
+          onComplete: () => setState(() => _flow = AppFlow.login),
+        );
+      case AppFlow.login:
+        return AuthScreen(
+          onSignIn: () => setState(() => _flow = AppFlow.main),
+          onSignUp: () => setState(() => _flow = AppFlow.onboarding),
         );
       case AppFlow.onboarding:
         return OnboardingScreen(
@@ -108,4 +114,4 @@ class _AppFlowControllerState extends State<AppFlowController> {
   }
 }
 
-enum AppFlow { splash, onboarding, main }
+enum AppFlow { splash, login, onboarding, main }

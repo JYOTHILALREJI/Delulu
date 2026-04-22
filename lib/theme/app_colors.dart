@@ -12,6 +12,7 @@ class AppColors {
   static const Color pinkLight = Color(0xFFF9A8D4);
   static const Color pinkSoft = Color(0xFFFB7185);
   static const Color white = Color(0xFFFFFFFF);
+  static const Color whiteAlpha80 = Color(0xCCFFFFFF);
   static const Color whiteAlpha60 = Color(0x99FFFFFF);
   static const Color whiteAlpha40 = Color(0x66FFFFFF);
   static const Color whiteAlpha20 = Color(0x33FFFFFF);
