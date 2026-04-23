@@ -1,8 +1,7 @@
 import os
 from typing import List
 from pydantic_settings import BaseSettings
-from pydantic import validator
-
+from pydantic import ConfigDict, field_validator
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
@@ -23,10 +22,12 @@ class Settings(BaseSettings):
     DB_PASSWORD: str = "delulu_secure_password"
     DATABASE_URL: str = ""
     
-    @validator("DATABASE_URL", pre=True)
-    def assemble_db_url(cls, v, values):
+    @field_validator("DATABASE_URL", mode="before")
+    @classmethod
+    def assemble_db_url(cls, v, info):
         if v:
             return v
+        values = info.data
         return f"postgresql+asyncpg://{values.get('DB_USER')}:{values.get('DB_PASSWORD')}@{values.get('DB_HOST')}:{values.get('DB_PORT')}/{values.get('DB_NAME')}"
     
     # Firebase
@@ -54,10 +55,12 @@ class Settings(BaseSettings):
     SMTP_USER: str = ""
     SMTP_PASSWORD: str = ""
     
-    class Config:
-        env_file = ".env"
-        case_sensitive = True
-
+    # Pydantic v2 configuration
+    model_config = ConfigDict(
+        env_file=".env",
+        case_sensitive=True,
+        extra="ignore"          # This ignores extra fields like FIREBASE_TYPE
+    )
 
 # Singleton instance
 settings = Settings()

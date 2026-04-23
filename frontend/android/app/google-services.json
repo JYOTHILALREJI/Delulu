@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "467941923519",
+    "project_id": "delulu-datingapp",
+    "storage_bucket": "delulu-datingapp.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:467941923519:android:aa5cbf71587c0bf70dc40a",
+        "android_client_info": {
+          "package_name": "com.example.delulu"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBE9ihkZ6y5zF2vpousgQKo4Dh0jRtKF1w"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
