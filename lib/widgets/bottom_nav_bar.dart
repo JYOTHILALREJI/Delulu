@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../theme/app_colors.dart';
 
-enum NavTab { discovery, requests, chat, profile }
+enum NavTab { discovery, requests, chat, likes, profile }
 
 class BottomNavBar extends StatelessWidget {
   final NavTab selectedTab;
@@ -52,6 +52,14 @@ class BottomNavBar extends StatelessWidget {
                 isActive: selectedTab == NavTab.chat,
                 badge: 2,
                 onTap: () => onTabChanged(NavTab.chat),
+              ),
+              _NavItem(
+                icon: Icons.favorite_border, // Outlined when inactive
+                activeIcon: Icons.favorite,   // Filled when active
+                label: 'LIKES',
+                isActive: selectedTab == NavTab.likes,
+                badge: 5,
+                onTap: () => onTabChanged(NavTab.likes),
               ),
               _NavItem(
                 icon: Icons.person_outline,
@@ -109,12 +117,14 @@ class _NavItem extends StatelessWidget {
                   right: -8,
                   top: -4,
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
                     decoration: BoxDecoration(
                       color: AppColors.pinkAccent,
                       borderRadius: BorderRadius.circular(10),
                     ),
-                    constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
+                    constraints:
+                        const BoxConstraints(minWidth: 16, minHeight: 16),
                     child: Text(
                       '$badge',
                       style: const TextStyle(

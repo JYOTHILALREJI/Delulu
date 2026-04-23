@@ -128,7 +128,7 @@ class _SplashScreenState extends State<SplashScreen>
                 SizedBox(
                   height: 80,
                   child: FadeTransition(
-                    opacity: _textOpacity, // Show tips after logo animation starts
+                    opacity: _textOpacity,
                     child: AnimatedSwitcher(
                       duration: const Duration(milliseconds: 600),
                       transitionBuilder: (Widget child, Animation<double> animation) {
@@ -182,4 +182,3 @@ class _SplashScreenState extends State<SplashScreen>
     );
   }
 }
-

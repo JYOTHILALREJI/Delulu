@@ -7,7 +7,8 @@ import 'screens/splash_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/onboarding_screen.dart';
 import 'screens/discovery_screen.dart';
-import 'screens/chat_screen.dart';
+import 'screens/chat_list_screen.dart'; // <-- Changed import
+import 'screens/likes_screen.dart';
 import 'screens/requests_screen.dart';
 import 'screens/profile_screen.dart';
 
@@ -74,7 +75,7 @@ class _AppFlowControllerState extends State<AppFlowController> {
         );
       case AppFlow.login:
         return AuthScreen(
-          onSignIn: () => setState(() => _flow = AppFlow.main),
+          onSignIn: () => setState(() => _flow = AppFlow.onboarding),
           onSignUp: () => setState(() => _flow = AppFlow.onboarding),
         );
       case AppFlow.onboarding:
@@ -86,7 +87,7 @@ class _AppFlowControllerState extends State<AppFlowController> {
     }
   }
 
-  Widget _buildMainApp() {
+    Widget _buildMainApp() {
     return Scaffold(
       body: SafeArea(
         child: Column(
@@ -95,11 +96,12 @@ class _AppFlowControllerState extends State<AppFlowController> {
             Expanded(
               child: IndexedStack(
                 index: _currentTab.index,
-                children: const [
-                  DiscoveryScreen(),
-                  RequestsScreen(),
-                  ChatScreen(),
-                  ProfileScreen(),
+                children: [
+                  const DiscoveryScreen(),
+                  const RequestsScreen(),
+                  ChatListScreen(),
+                  const LikesScreen(),
+                  const ProfileScreen(),
                 ],
               ),
             ),

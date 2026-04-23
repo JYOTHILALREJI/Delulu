@@ -2,7 +2,16 @@ import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
 
 class ChatScreen extends StatelessWidget {
-  const ChatScreen({super.key});
+  final String userName;
+  final String userInitial;
+  final bool isOnline;
+
+  const ChatScreen({
+    super.key,
+    required this.userName,
+    required this.userInitial,
+    this.isOnline = false,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -27,10 +36,10 @@ class ChatScreen extends StatelessWidget {
                   colors: [AppColors.purpleAccent, AppColors.pinkAccent],
                 ),
               ),
-              child: const Center(
+              child: Center(
                 child: Text(
-                  'M',
-                  style: TextStyle(
+                  userInitial,
+                  style: const TextStyle(
                       color: Colors.white,
                       fontWeight: FontWeight.w600,
                       fontSize: 14),
@@ -41,17 +50,20 @@ class ChatScreen extends StatelessWidget {
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  'Mystic_Rose',
-                  style: TextStyle(
+                Text(
+                  userName,
+                  style: const TextStyle(
                     fontSize: 15,
                     fontWeight: FontWeight.w600,
                     color: AppColors.white,
                   ),
                 ),
                 Text(
-                  'Online',
-                  style: TextStyle(fontSize: 11, color: AppColors.greenGlow),
+                  isOnline ? 'Online' : 'Offline',
+                  style: TextStyle(
+                    fontSize: 11, 
+                    color: isOnline ? AppColors.greenGlow : AppColors.textDim
+                  ),
                 ),
               ],
             ),
