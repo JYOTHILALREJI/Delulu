@@ -1,0 +1,45 @@
+name: Delulu
+description: Privacy-first dating app
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  supabase_flutter: ^2.5.0
+  google_sign_in: ^6.1.0
+  image_picker: ^1.0.5
+  file_picker: ^5.5.0
+  flutter_secure_storage: ^9.0.0
+  flutter_dotenv: ^5.1.0
+  cached_network_image: ^3.3.0
+  flutter_blurhash: ^0.8.2
+  vibration: ^1.8.0
+  agora_rtc_engine: ^6.2.0
+  permission_handler: ^11.0.0
+  flutter_local_notifications: ^16.3.0
+  firebase_core: ^2.24.0
+  firebase_messaging: ^14.7.0
+  http: ^1.1.0
+  intl: ^0.18.1
+  socket_io_client: ^2.0.3
+  google_ml_kit: ^0.16.0
+  camera: ^0.10.5
+  image: ^4.1.3
+  path_provider: ^2.1.1
+  provider: ^6.1.1
+  go_router: ^13.0.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/
+    - .env
