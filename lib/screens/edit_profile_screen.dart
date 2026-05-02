@@ -19,7 +19,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   final _bioController = TextEditingController();
   List<String> _interests = [];
   List<String> _existingPhotos = [];
-  List<XFile> _newPhotos = [];
+  final List<XFile> _newPhotos = [];
   bool _isLoading = true;
   bool _isSaving = false;
 
@@ -138,10 +138,13 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                         );
                       }
                       final isExisting = index < _existingPhotos.length;
-                      final imageUrl = isExisting
-                          ? _existingPhotos[index]
-                          : _newPhotos[index - _existingPhotos.length].path;
-                      return Image.network(imageUrl, fit: BoxFit.cover);
+                      if (isExisting) {
+                        return Image.network(_existingPhotos[index], fit: BoxFit.cover);
+                      }
+                      return Image.file(
+                        File(_newPhotos[index - _existingPhotos.length].path),
+                        fit: BoxFit.cover,
+                      );
                     },
                   ),
                   const SizedBox(height: 32),

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:go_router/go_router.dart';
-import '../widgets/blurred_image.dart';
+import '../wiggets/blurred_image.dart';
 
 class DiscoveryScreen extends StatefulWidget {
   const DiscoveryScreen({super.key});
@@ -54,6 +54,7 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
       'to_user': toUserId,
       'status': 'pending',
     });
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Connection request sent')),
     );

@@ -27,5 +27,6 @@ class NotificationService {
 
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  // ignore: avoid_print
   print("Handling a background message: ${message.messageId}");
 }

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -39,6 +40,7 @@ class _SplashScreenState extends State<SplashScreen>
 
   Future<void> _checkAuth() async {
     await Future.delayed(const Duration(seconds: 3));
+    if (!mounted) return;
     final session = Supabase.instance.client.auth.currentSession;
     if (session != null) {
       // Check if profile exists
@@ -47,6 +49,7 @@ class _SplashScreenState extends State<SplashScreen>
           .select()
           .eq('id', session.user.id)
           .maybeSingle();
+      if (!mounted) return;
       if (profile != null) {
         context.go('/discovery');
       } else {
@@ -83,9 +86,9 @@ class _SplashScreenState extends State<SplashScreen>
                 child: Container(
                   padding: const EdgeInsets.all(24),
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.05),
+                    color: Colors.white.withValues(alpha: 0.05),
                     borderRadius: BorderRadius.circular(48),
-                    border: Border.all(color: Colors.white.withOpacity(0.1)),
+                    border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
                   ),
                   child: Image.asset(
                     'assets/images/logo.png',
@@ -137,7 +140,7 @@ class _SplashScreenState extends State<SplashScreen>
                     decoration: BoxDecoration(
                       color: i == _tipIndex % 3
                           ? const Color(0xFFECB2FF)
-                          : Colors.white.withOpacity(0.3),
+                          : Colors.white.withValues(alpha: 0.3),
                       borderRadius: BorderRadius.circular(3),
                     ),
                   ),

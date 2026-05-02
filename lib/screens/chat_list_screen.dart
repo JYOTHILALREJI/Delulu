@@ -62,8 +62,12 @@ class _ChatListScreenState extends State<ChatListScreen> {
                     final chat = _chats[index];
                     return ListTile(
                       leading: CircleAvatar(
-                        backgroundImage: NetworkImage(chat['peerPhoto']),
-                        child: const Icon(Icons.person),
+                        backgroundImage: chat['peerPhoto'].toString().isNotEmpty
+                            ? NetworkImage(chat['peerPhoto'])
+                            : null,
+                        child: chat['peerPhoto'].toString().isEmpty
+                            ? const Icon(Icons.person)
+                            : null,
                       ),
                       title: Text(chat['peerName']),
                       onTap: () {

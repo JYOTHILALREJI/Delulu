@@ -15,7 +15,6 @@ class CallScreen extends StatefulWidget {
 
 class _CallScreenState extends State<CallScreen> {
   int? _remoteUid;
-  bool _isJoined = false;
   late RtcEngine _engine;
 
   @override
@@ -27,7 +26,7 @@ class _CallScreenState extends State<CallScreen> {
   Future<void> _initAgora() async {
     await [Permission.microphone, Permission.camera].request();
     _engine = createAgoraRtcEngine();
-    await _engine.initialize(const RtcEngineContext(
+    await _engine.initialize(RtcEngineContext(
       appId: dotenv.env['AGORA_APP_ID']!,
       channelProfile: ChannelProfileType.channelProfileCommunication,
     ));
@@ -35,7 +34,7 @@ class _CallScreenState extends State<CallScreen> {
     _engine.registerEventHandler(
       RtcEngineEventHandler(
         onJoinChannelSuccess: (RtcConnection connection, int elapsed) {
-          setState(() => _isJoined = true);
+          setState(() {});
         },
         onUserJoined: (RtcConnection connection, int remoteUid, int elapsed) {
           setState(() => _remoteUid = remoteUid);
@@ -90,9 +89,9 @@ class _CallScreenState extends State<CallScreen> {
                 border: Border.all(color: Colors.white, width: 2),
               ),
               child: AgoraVideoView(
-                controller: VideoViewController.local(
+                controller: VideoViewController(
                   rtcEngine: _engine,
-                  canvas: const VideoCanvas(),
+                  canvas: const VideoCanvas(uid: 0),
                 ),
               ),
             ),

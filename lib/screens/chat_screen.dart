@@ -6,8 +6,8 @@ import 'package:file_picker/file_picker.dart';
 import 'package:go_router/go_router.dart';
 import '../services/storage_service.dart';
 import '../services/notification_service.dart';
-import '../widgets/attention_seeker_button.dart';
-import '../widgets/message_bubble.dart';
+import '../wiggets/attention_seeker_button.dart';
+import '../wiggets/message_bubble.dart';
 
 class ChatScreen extends StatefulWidget {
   final String roomId;

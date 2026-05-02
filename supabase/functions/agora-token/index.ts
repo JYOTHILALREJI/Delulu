@@ -1,9 +1,9 @@
-import { RtcTokenBuilder, RtcRole } from 'agora-access-token';
+import { RtcTokenBuilder, RtcRole } from 'npm:agora-access-token@^2.0.4';
 
 const AGORA_APP_ID = Deno.env.get('AGORA_APP_ID')!;
 const AGORA_CERTIFICATE = Deno.env.get('AGORA_CERTIFICATE')!;
 
-Deno.serve(async (req) => {
+Deno.serve(async (req: Request) => {
     try {
         const { channelName, uid } = await req.json();
         const token = RtcTokenBuilder.buildTokenWithUid(

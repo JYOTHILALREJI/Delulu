@@ -105,7 +105,7 @@ class _ProfileCompletionScreenState extends State<ProfileCompletionScreen> {
                 const SizedBox(height: 16),
                 const Text('Gender'),
                 DropdownButtonFormField<String>(
-                  value: _selectedGender,
+                  initialValue: _selectedGender,
                   items: ['Man', 'Woman', 'Non-binary', 'Prefer not to say']
                       .map((g) => DropdownMenuItem(value: g, child: Text(g)))
                       .toList(),

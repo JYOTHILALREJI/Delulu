@@ -2,11 +2,9 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:google_ml_kit/google_ml_kit.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:go_router/go_router.dart';
 import 'dart:typed_data';
-import 'package:image/image.dart' as img;
 
 class FaceVerificationScreen extends StatefulWidget {
   const FaceVerificationScreen({super.key});
@@ -19,7 +17,6 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
   CameraController? _controller;
   final FaceDetector _faceDetector = GoogleMlKit.vision.faceDetector();
   bool _isProcessing = false;
-  bool _isVerified = false;
 
   @override
   void initState() {
@@ -47,6 +44,7 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
       final inputImage = InputImage.fromFile(file);
       final faces = await _faceDetector.processImage(inputImage);
       if (faces.isEmpty) {
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('No face detected. Try again.')),
         );
@@ -62,16 +60,15 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
         'face_hash': hash,
         'is_verified': true,
       }).eq('id', userId);
-      if (mounted) {
-        setState(() => _isVerified = true);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Face verified!')),
-        );
-        Future.delayed(const Duration(seconds: 2), () {
-          context.go('/discovery');
-        });
-      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Face verified!')),
+      );
+      Future.delayed(const Duration(seconds: 2), () {
+        if (mounted) context.go('/discovery');
+      });
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error: $e')),
       );

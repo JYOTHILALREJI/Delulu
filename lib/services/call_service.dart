@@ -4,8 +4,9 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 class CallService {
   static Future<String> getAgoraToken(String channelName, int uid) async {
+    final supabaseFunctionsUrl = dotenv.env['SUPABASE_FUNCTIONS_URL']!;
     final response = await http.post(
-      Uri.parse('${dotenv.env['API_BASE_URL']}/api/agora_token'),
+      Uri.parse('$supabaseFunctionsUrl/agora-token'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({'channelName': channelName, 'uid': uid}),
     );

@@ -1,7 +1,6 @@
 import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:path/path.dart' as path;
 
 class StorageService {
   static Future<String> uploadFile(File file) async {

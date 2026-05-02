@@ -18,13 +18,25 @@ class OnboardingScreen extends StatelessWidget {
         idToken: googleAuth.idToken!,
         accessToken: googleAuth.accessToken,
       );
+      if (!context.mounted) return;
       if (response.user != null) {
-        context.go('/profile-completion');
+        // Check if user already has a profile (returning user)
+        final profile = await Supabase.instance.client
+            .from('profiles')
+            .select('id')
+            .eq('id', response.user!.id)
+            .maybeSingle();
+        if (!context.mounted) return;
+        if (profile != null) {
+          context.go('/discovery');
+        } else {
+          context.go('/profile-completion');
+        }
       } else {
         _showError(context, 'Sign in failed. Please try again.');
       }
     } catch (e) {
-      _showError(context, e.toString());
+      if (context.mounted) _showError(context, e.toString());
     }
   }
 

@@ -18,7 +18,7 @@ class PremiumScreen extends StatelessWidget {
               child: Container(
                 padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
-                  color: AppColors.primaryContainer.withOpacity(0.2),
+                  color: AppColors.primaryContainer.withValues(alpha: 0.2),
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: const Icon(Icons.stars, size: 80, color: AppColors.primary),
