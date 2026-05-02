@@ -1,0 +1,6 @@
+{
+  "users_query": "SELECT id, name, age, is_verified, premium_until, created_at FROM profiles ORDER BY created_at DESC LIMIT 100",
+  "reported_messages_query": "SELECT m.*, p.name as sender_name FROM messages m JOIN profiles p ON m.sender_id = p.id WHERE m.is_reported = true",
+  "ban_user_action": "UPDATE profiles SET is_banned = true WHERE id = {{ user_id }}",
+  "daily_stats_query": "SELECT * FROM admin_daily_stats ORDER BY date DESC LIMIT 30"
+}
