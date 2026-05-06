@@ -5,6 +5,7 @@ import 'screens/auth/login_screen.dart';
 import 'screens/auth/signup_screen.dart';
 import 'screens/onboarding/onboarding_screen.dart';
 import 'screens/home/home_screen.dart';
+import 'components/verification_prompt_wrapper.dart';
 
 void main() {
   runApp(const DeluluApp());
@@ -21,6 +22,9 @@ class DeluluApp extends StatelessWidget {
       theme: ThemeData.dark().copyWith(
         scaffoldBackgroundColor: AppColors.background,
       ),
+      builder: (context, child) {
+        return VerificationPromptWrapper(child: child!);
+      },
       initialRoute: '/',
       onGenerateRoute: (settings) {
         switch (settings.name) {

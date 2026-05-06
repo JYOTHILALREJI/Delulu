@@ -101,8 +101,11 @@ router.post('/login', async (req, res) => {
 router.get('/me', authMiddleware, async (req, res) => {
   try {
     const result = await db.query(
-      `SELECT u.id, u.email, u.display_name, u.is_onboarded, u.created_at,
-              p.display_name AS profile_name, p.age, p.gender, p.interested_in, p.bio, p.interests
+      `SELECT u.id, u.email, u.display_name, u.is_onboarded, u.created_at, u.is_verified,
+              p.display_name AS profile_name, p.age, p.gender, p.interested_in, p.bio, p.interests, p.photos,
+              p.online_status_enabled, p.typing_indicator_enabled, p.last_seen_enabled, p.read_receipt_enabled,
+              p.latitude, p.longitude, p.live_location_enabled, p.location_name,
+              p.is_premium, p.last_attention_seeker_at
        FROM users u
        LEFT JOIN profiles p ON p.user_id = u.id
        WHERE u.id = $1`,
@@ -121,11 +124,23 @@ router.get('/me', authMiddleware, async (req, res) => {
         email: row.email,
         display_name: row.profile_name || row.display_name || '',
         is_onboarded: row.is_onboarded,
+        is_verified: row.is_verified,
         age: row.age,
         gender: row.gender,
         interested_in: row.interested_in,
         bio: row.bio,
         interests: row.interests,
+        photos: row.photos,
+        online_status_enabled: row.online_status_enabled,
+        typing_indicator_enabled: row.typing_indicator_enabled,
+        last_seen_enabled: row.last_seen_enabled,
+        read_receipt_enabled: row.read_receipt_enabled,
+        latitude: row.latitude,
+        longitude: row.longitude,
+        live_location_enabled: row.live_location_enabled,
+        location_name: row.location_name,
+        is_premium: row.is_premium,
+        last_attention_seeker_at: row.last_attention_seeker_at,
       },
     });
   } catch (err) {

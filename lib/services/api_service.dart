@@ -36,6 +36,10 @@ class ApiService {
     await prefs.remove('auth_token');
   }
 
+  static Future<http.Response> getVersion() async {
+    return await http.get(Uri.parse('$baseUrl/version'));
+  }
+
   static Future<http.Response> register({
     required String email,
     required String password,
@@ -101,5 +105,102 @@ class ApiService {
     return http
         .get(Uri.parse('$baseUrl/likes/liked'), headers: headers)
         .timeout(_timeout);
+  }
+
+  static Future<http.Response> getLikedHistory() async {
+    final headers = await authHeaders();
+    return http
+        .get(Uri.parse('$baseUrl/likes/history'), headers: headers)
+        .timeout(_timeout);
+  }
+
+  static Future<http.Response> deleteLike(String likedUserId) async {
+    final headers = await authHeaders();
+    return http
+        .delete(Uri.parse('$baseUrl/likes/$likedUserId'), headers: headers)
+        .timeout(_timeout);
+  }
+
+  static Future<http.Response> sendConnectionRequest(String receiverId) async {
+    final headers = await authHeaders();
+    return http
+        .post(Uri.parse('$baseUrl/requests/send'),
+            headers: headers,
+            body: jsonEncode({'receiverId': receiverId}))
+        .timeout(_timeout);
+  }
+
+  static Future<http.Response> getPendingRequests() async {
+    final headers = await authHeaders();
+    return http
+        .get(Uri.parse('$baseUrl/requests/pending'), headers: headers)
+        .timeout(_timeout);
+  }
+
+  static Future<http.Response> getHistoryRequests() async {
+    final headers = await authHeaders();
+    return http
+        .get(Uri.parse('$baseUrl/requests/history'), headers: headers)
+        .timeout(_timeout);
+  }
+
+  static Future<http.Response> acceptRequest(int requestId) async {
+    final headers = await authHeaders();
+    return http
+        .put(Uri.parse('$baseUrl/requests/$requestId/accept'), headers: headers)
+        .timeout(_timeout);
+  }
+
+  static Future<http.Response> rejectRequest(int requestId) async {
+    final headers = await authHeaders();
+    return http
+        .put(Uri.parse('$baseUrl/requests/$requestId/reject'), headers: headers)
+        .timeout(_timeout);
+  }
+
+  static Future<http.Response> getConnections() async {
+    final headers = await authHeaders();
+    return http
+        .get(Uri.parse('$baseUrl/whispers/connections'), headers: headers)
+        .timeout(_timeout);
+  }
+
+  static Future<http.Response> getMessages(int channelId) async {
+    final headers = await authHeaders();
+    return http
+        .get(Uri.parse('$baseUrl/whispers/messages/$channelId'), headers: headers)
+        .timeout(_timeout);
+  }
+
+  static Future<http.Response> sendMessage(int channelId, String content) async {
+    final headers = await authHeaders();
+    return http
+        .post(Uri.parse('$baseUrl/whispers/send'),
+            headers: headers,
+            body: jsonEncode({'channelId': channelId, 'content': content}))
+        .timeout(_timeout);
+  }
+
+  static Future<http.Response> getUnreadTotal() async {
+    final headers = await authHeaders();
+    return http
+        .get(Uri.parse('$baseUrl/whispers/unread-total'), headers: headers)
+        .timeout(_timeout);
+  }
+
+  static Future<http.Response> markAsRead(int channelId) async {
+    final headers = await authHeaders();
+    return http
+        .post(Uri.parse('$baseUrl/whispers/mark-read/$channelId'), headers: headers)
+        .timeout(_timeout);
+  }
+
+  static Map<String, dynamic> getMeData(http.Response res) {
+    try {
+      final body = jsonDecode(res.body);
+      return body['user'] ?? {};
+    } catch (_) {
+      return {};
+    }
   }
 }

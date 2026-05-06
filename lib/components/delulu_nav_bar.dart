@@ -5,11 +5,13 @@ import '../theme/app_colors.dart';
 class DeluluNavBar extends StatefulWidget {
   final int currentIndex;
   final ValueChanged<int> onTap;
+  final int whisperUnreadCount;
 
   const DeluluNavBar({
     super.key,
     required this.currentIndex,
     required this.onTap,
+    this.whisperUnreadCount = 0,
   });
 
   @override
@@ -148,12 +150,42 @@ class _DeluluNavBarState extends State<DeluluNavBar> {
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(
-                              item.icon,
-                              size: 19,                     // a bit smaller (was 20)
-                              color: isActive
-                                  ? AppColors.primary
-                                  : AppColors.onSurfaceVariant.withValues(alpha: 0.5),
+                            Stack(
+                              clipBehavior: Clip.none,
+                              children: [
+                                Icon(
+                                  item.icon,
+                                  size: 19,
+                                  color: isActive
+                                      ? AppColors.primary
+                                      : AppColors.onSurfaceVariant.withValues(alpha: 0.5),
+                                ),
+                                if (index == 3 && widget.whisperUnreadCount > 0)
+                                  Positioned(
+                                    right: -8,
+                                    top: -8,
+                                    child: Container(
+                                      padding: const EdgeInsets.all(4),
+                                      decoration: const BoxDecoration(
+                                        color: AppColors.primaryContainer,
+                                        shape: BoxShape.circle,
+                                      ),
+                                      constraints: const BoxConstraints(
+                                        minWidth: 16,
+                                        minHeight: 16,
+                                      ),
+                                      child: Text(
+                                        '${widget.whisperUnreadCount > 9 ? '9+' : widget.whisperUnreadCount}',
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 9,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                        textAlign: TextAlign.center,
+                                      ),
+                                    ),
+                                  ),
+                              ],
                             ),
                             const SizedBox(height: 2),
                             Text(

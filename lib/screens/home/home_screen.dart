@@ -1,9 +1,14 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../../components/delulu_nav_bar.dart';
 import '../../services/api_service.dart';
 import '../../theme/app_colors.dart';
 import '../discovery/discovery_screen.dart';
 import '../signals/signals_screen.dart';
+import '../pings/pings_screen.dart';
+import '../whisper/whispers_screen.dart';
+import '../../services/socket_service.dart';
+import '../aura/aura_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -14,7 +19,50 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   int _currentIndex = 0;
+  int _unreadCount = 0;
   final GlobalKey<SignalsScreenState> _signalsKey = GlobalKey<SignalsScreenState>();
+  final GlobalKey<PingsScreenState> _pingsKey = GlobalKey<PingsScreenState>();
+  final GlobalKey<WhispersScreenState> _whispersKey = GlobalKey<WhispersScreenState>();
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchUnreadCount();
+    _initSocket();
+  }
+
+  void _initSocket() {
+    SocketService().connect();
+    // Listen for events that should trigger a refresh of the global unread count
+    SocketService().unreadStream.listen((_) => _fetchUnreadCount());
+    SocketService().messageStream.listen((_) => _fetchUnreadCount());
+  }
+
+  @override
+  void dispose() {
+    // We might want to keep the socket alive while the app is in foreground
+    // but definitely dispose of any listeners if they were separate.
+    // For now, let the singleton handle its lifecycle.
+    super.dispose();
+  }
+
+  Future<void> _fetchUnreadCount() async {
+    try {
+      final res = await ApiService.getUnreadTotal();
+      if (res.statusCode == 200) {
+        final body = jsonDecode(res.body);
+        final count = body['total_unread'] ?? 0;
+        print('DEBUG: Fetched unread count: $count');
+        if (mounted) {
+          setState(() {
+            _unreadCount = count;
+          });
+        }
+      }
+    } catch (e) {
+      print('DEBUG: Error fetching unread count: $e');
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -28,20 +76,28 @@ class _HomeScreenState extends State<HomeScreen> {
             children: [
               const DiscoveryScreen(),
               SignalsScreen(key: _signalsKey),
-              const _PingsTab(),
-              const _WhispersTab(),
-              const _AuraTab(),
+              PingsScreen(key: _pingsKey),
+              WhispersScreen(key: _whispersKey),
+              const AuraScreen(),
             ],
           ),
 
           // Reusable Nav Bar
           DeluluNavBar(
             currentIndex: _currentIndex,
+            whisperUnreadCount: _unreadCount,
             onTap: (index) {
               setState(() => _currentIndex = index);
+              _fetchUnreadCount(); // Refresh unread count on any tab change
               if (index == 1) {
                 // Refresh signals when tab is clicked
                 _signalsKey.currentState?.fetchLiked();
+              } else if (index == 2) {
+                // Refresh pings when tab is clicked
+                _pingsKey.currentState?.fetchRequests();
+              } else if (index == 3) {
+                // Refresh whispers when tab is clicked
+                _whispersKey.currentState?.fetchConnections();
               }
             },
           ),
@@ -88,53 +144,6 @@ class _WhispersTab extends StatelessWidget {
         ),
       ),
     );
-  }
-}
-
-class _AuraTab extends StatelessWidget {
-  const _AuraTab({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Text(
-            'Aura (Profile)',
-            style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.w600,
-              color: AppColors.onSurface,
-              fontFamily: 'BeVietnamPro',
-            ),
-          ),
-          const SizedBox(height: 32),
-          GestureDetector(
-            onTap: () async {
-              await ApiService.clearToken();
-              if (context.mounted) {
-                Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false);
-              }
-            },
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppColors.error.withValues(alpha: 0.3)),
-              ),
-              child: const Text(
-                'Logout (dev)',
-                style: TextStyle(
-                  fontSize: 13,
-                  color: AppColors.error,
-                  fontFamily: 'BeVietnamPro',
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
+  
   }
 }

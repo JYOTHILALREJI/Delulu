@@ -34,9 +34,15 @@ function getPlaceholderPhotos(gender, count) {
 
 router.get('/feed', authMiddleware, async (req, res) => {
   try {
+    // Get current user's location
+    const me = await db.query('SELECT latitude, longitude FROM profiles WHERE user_id = $1', [req.userId]);
+    const myLat = me.rows[0]?.latitude;
+    const myLng = me.rows[0]?.longitude;
+
     const result = await db.query(`
       SELECT
         u.id as id,
+        u.is_verified,
         p.display_name,
         p.age,
         p.gender,
@@ -46,7 +52,15 @@ router.get('/feed', authMiddleware, async (req, res) => {
         p.photos,
         p.latitude,
         p.longitude,
-        EXISTS(SELECT 1 FROM likes WHERE liker_user_id = $1 AND liked_user_id = u.id) as is_liked
+        p.live_location_enabled,
+        EXISTS(SELECT 1 FROM likes WHERE liker_user_id = $1 AND liked_user_id = u.id) as is_liked,
+        (SELECT status FROM connection_requests 
+         WHERE (sender_id = $1 AND receiver_id = u.id) 
+            OR (sender_id = u.id AND receiver_id = $1)
+         ORDER BY (status = 'accepted') DESC, created_at DESC LIMIT 1) as request_status,
+        (SELECT id FROM channels 
+         WHERE (user1_id = $1 AND user2_id = u.id) 
+            OR (user1_id = u.id AND user2_id = $1) LIMIT 1) as channel_id
       FROM profiles p
       JOIN users u ON p.user_id = u.id
       WHERE u.id != $1
@@ -55,24 +69,31 @@ router.get('/feed', authMiddleware, async (req, res) => {
       LIMIT 20
     `, [req.userId]);
 
-    console.log(`Discovery feed: found ${result.rows.length} profiles for user ${req.userId}`);
-
-      // Process profiles: add placeholder photos if empty
-      const profiles = result.rows.map(row => {
-        let photos = [];
-        if (row.photos) {
-          if (typeof row.photos === 'string') {
-            try {
-              photos = JSON.parse(row.photos);
-            } catch (_) {
-              photos = [];
-            }
-          } else {
-            photos = row.photos;
-          }
+    const profiles = result.rows.map(row => {
+      const parseJson = (val) => {
+        if (!val) return [];
+        if (typeof val === 'string') {
+          try { return JSON.parse(val); } catch (_) { return []; }
         }
+        return val;
+      };
 
-        console.log(`  Profile ${row.display_name}: ${photos.length} photos found in DB`);
+      let photos = parseJson(row.photos);
+      let interests = parseJson(row.interests);
+
+      // Calculate distance if both have location
+      let distance = null;
+      if (myLat && myLng && row.latitude && row.longitude && row.live_location_enabled) {
+        // Simple Haversine approximation
+        const R = 3958.8; // Miles
+        const dLat = (row.latitude - myLat) * Math.PI / 180;
+        const dLon = (row.longitude - myLng) * Math.PI / 180;
+        const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+          Math.cos(myLat * Math.PI / 180) * Math.cos(row.latitude * Math.PI / 180) *
+          Math.sin(dLon / 2) * Math.sin(dLon / 2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        distance = Math.round(R * c);
+      }
 
       // If no photos uploaded, assign placeholders
       if (photos.length === 0) {
@@ -81,7 +102,9 @@ router.get('/feed', authMiddleware, async (req, res) => {
 
       return {
         ...row,
-        photos
+        photos,
+        interests,
+        distance
       };
     });
 

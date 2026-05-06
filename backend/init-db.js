@@ -54,11 +54,48 @@ async function initDb() {
     `);
     console.log('  ✓ likes');
 
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS connection_requests (
+        id SERIAL PRIMARY KEY,
+        sender_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        receiver_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'rejected')),
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(sender_id, receiver_id)
+      );
+    `);
+    console.log('  ✓ connection_requests');
+
+    // Channels table (one per accepted connection)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS channels (
+        id SERIAL PRIMARY KEY,
+        user1_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        user2_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(user1_id, user2_id)
+      );
+    `);
+    console.log('  ✓ channels');
+
+    // Messages table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS messages (
+        id SERIAL PRIMARY KEY,
+        channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+        sender_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        content TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        read_at TIMESTAMP
+      );
+    `);
+    console.log('  ✓ messages');
+
     // Add display_name column if upgrading existing db
     try {
       await client.query(`
-        ALTER TABLE users ADD COLUMN IF NOT EXISTS display_name VARCHAR(100) DEFAULT '';
-      `);
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS display_name VARCHAR(100) DEFAULT '';
+          `);
       console.log('  ✓ added display_name to users (if missing)');
     } catch (e) {
       // Column already exists, ignore
