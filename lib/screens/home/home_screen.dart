@@ -28,8 +28,9 @@ class _HomeScreenState extends State<HomeScreen> {
             children: [
               const DiscoveryScreen(),
               SignalsScreen(key: _signalsKey),
+              const _PingsTab(),
               const _WhispersTab(),
-              _AuraTab(),
+              const _AuraTab(),
             ],
           ),
 
@@ -51,6 +52,25 @@ class _HomeScreenState extends State<HomeScreen> {
 }
 
 // ── Placeholder Tabs ──
+
+class _PingsTab extends StatelessWidget {
+  const _PingsTab({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return const Center(
+      child: Text(
+        'Pings (Notifications)',
+        style: TextStyle(
+          fontSize: 20,
+          fontWeight: FontWeight.w600,
+          color: AppColors.onSurface,
+          fontFamily: 'BeVietnamPro',
+        ),
+      ),
+    );
+  }
+}
 
 class _WhispersTab extends StatelessWidget {
   const _WhispersTab({super.key});

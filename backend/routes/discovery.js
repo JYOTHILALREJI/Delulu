@@ -45,7 +45,8 @@ router.get('/feed', authMiddleware, async (req, res) => {
         p.interests,
         p.photos,
         p.latitude,
-        p.longitude
+        p.longitude,
+        EXISTS(SELECT 1 FROM likes WHERE liker_user_id = $1 AND liked_user_id = u.id) as is_liked
       FROM profiles p
       JOIN users u ON p.user_id = u.id
       WHERE u.id != $1

@@ -25,7 +25,8 @@ class _DeluluNavBarState extends State<DeluluNavBar> {
   @override
   void initState() {
     super.initState();
-    _itemKeys = List.generate(4, (_) => GlobalKey());
+    // 5 tabs now
+    _itemKeys = List.generate(5, (_) => GlobalKey());
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _updateMeasurements();
       setState(() => _ready = true);
@@ -65,6 +66,7 @@ class _DeluluNavBarState extends State<DeluluNavBar> {
     final items = [
       _NavItem(icon: Icons.auto_awesome, label: 'Vibes'),
       _NavItem(icon: Icons.bolt, label: 'Signals'),
+      _NavItem(icon: Icons.person_add_outlined, label: 'Pings'),   // new tab
       _NavItem(icon: Icons.mark_unread_chat_alt_outlined, label: 'Whispers'),
       _NavItem(icon: Icons.spoke_outlined, label: 'Aura'),
     ];
@@ -74,10 +76,10 @@ class _DeluluNavBarState extends State<DeluluNavBar> {
       left: 0,
       right: 0,
       child: Container(
-        margin: const EdgeInsets.only(left: 16, right: 16, bottom: 8),
+        margin: const EdgeInsets.only(left: 12, right: 12, bottom: 8),   // slightly smaller margins
         decoration: BoxDecoration(
           color: Colors.black.withValues(alpha: 0.6),
-          borderRadius: BorderRadius.circular(24), // Slightly smaller radius
+          borderRadius: BorderRadius.circular(24),
           border: Border(
             top: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
           ),
@@ -93,12 +95,12 @@ class _DeluluNavBarState extends State<DeluluNavBar> {
         child: SafeArea(
           top: false,
           child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8), // Reduced vertical padding
+            padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),  // tighter horizontal padding
             child: Stack(
               key: _stackKey,
               clipBehavior: Clip.none,
               children: [
-                // Smooth sliding pill (no bounce, no scale)
+                // Smooth sliding pill
                 if (_ready && _itemRects.isNotEmpty)
                   AnimatedPositioned(
                     duration: const Duration(milliseconds: 350),
@@ -140,24 +142,24 @@ class _DeluluNavBarState extends State<DeluluNavBar> {
                       behavior: HitTestBehavior.opaque,
                       child: Container(
                         padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 6, // Reduced vertical padding (was 10)
+                          horizontal: 10,   // slightly less than before (was 12)
+                          vertical: 5,      // slightly less (was 6)
                         ),
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             Icon(
                               item.icon,
-                              size: 20, // Slightly smaller icon
+                              size: 19,                     // a bit smaller (was 20)
                               color: isActive
                                   ? AppColors.primary
                                   : AppColors.onSurfaceVariant.withValues(alpha: 0.5),
                             ),
-                            const SizedBox(height: 2), // Reduced gap
+                            const SizedBox(height: 2),
                             Text(
                               item.label,
                               style: GoogleFonts.inter(
-                                fontSize: 9, // Smaller font
+                                fontSize: 9,                 // unchanged
                                 fontWeight: FontWeight.w600,
                                 letterSpacing: 1.0,
                                 color: isActive
