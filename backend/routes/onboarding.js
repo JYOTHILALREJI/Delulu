@@ -18,6 +18,8 @@ router.put('/profile', authMiddleware, async (req, res) => {
       photos,
     } = req.body;
 
+    console.log(`[Onboarding] Saving profile for user ${userId}. Photos received: ${photos ? photos.length : 0}`);
+
     // Validate required fields
     if (!display_name || !age || !gender || !interested_in) {
       return res.status(400).json({

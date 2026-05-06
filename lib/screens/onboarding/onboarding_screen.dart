@@ -10,9 +10,9 @@ import '../../services/api_service.dart';
 
 class PhotoItem {
   final String path;
-  bool isBlurred;
+  bool isPrivate;
 
-  PhotoItem(this.path, {this.isBlurred = false});
+  PhotoItem(this.path, {this.isPrivate = false});
 }
 
 class OnboardingScreen extends StatefulWidget {
@@ -246,9 +246,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     }
   }
 
-  void _toggleBlur(int index) {
+  void _togglePrivate(int index) {
+    if (index < 3) return; // Only indices 3, 4, 5 can be private
     setState(() {
-      _photoItems[index].isBlurred = !_photoItems[index].isBlurred;
+      _photoItems[index].isPrivate = !_photoItems[index].isPrivate;
     });
   }
 
@@ -264,11 +265,14 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     setState(() => _isLoading = true);
 
     try {
-      // Convert photos to base64 for API submission
-      List<String> base64Photos = [];
+      // Convert photos to base64 objects for API submission
+      List<Map<String, dynamic>> photosPayload = [];
       for (final photo in _photoItems) {
         final bytes = await File(photo.path).readAsBytes();
-        base64Photos.add(base64Encode(bytes));
+        photosPayload.add({
+          'url': 'data:image/jpeg;base64,' + base64Encode(bytes),
+          'is_private': photo.isPrivate,
+        });
       }
 
       final res = await ApiService.saveProfile({
@@ -278,8 +282,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         'interested_in': _selectedSeeking,
         'bio': _bioController.text.trim(),
         'interests': _interests,
-        'photos': base64Photos,
-        'photo_blur_status': _photoItems.map((p) => p.isBlurred).toList(),
+        'photos': photosPayload,
       });
 
       if (res.statusCode == 200) {
@@ -1329,7 +1332,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           fit: StackFit.expand,
           children: [
             // Image (blurred or not)
-            photo.isBlurred
+            photo.isPrivate
                 ? ImageFiltered(
                     imageFilter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
                     child: Image.file(
@@ -1358,7 +1361,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     },
                   ),
             // Overlay for blur indicator
-            if (photo.isBlurred)
+            if (photo.isPrivate)
               Container(
                 color: Colors.black.withValues(alpha: 0.3),
                 child: const Center(
@@ -1366,29 +1369,30 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 ),
               ),
             // Top right: lock toggle button
-            Positioned(
-              top: 8,
-              right: 8,
-              child: GestureDetector(
-                onTap: () => _toggleBlur(index),
-                child: Container(
-                  width: 32,
-                  height: 32,
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.6),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.2),
+            if (index >= 3)
+              Positioned(
+                top: 8,
+                right: 8,
+                child: GestureDetector(
+                  onTap: () => _togglePrivate(index),
+                  child: Container(
+                    width: 32,
+                    height: 32,
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.6),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.2),
+                      ),
                     ),
-                  ),
-                  child: Icon(
-                    photo.isBlurred ? Icons.lock_outline : Icons.lock_open,
-                    size: 16,
-                    color: Colors.white,
+                    child: Icon(
+                      photo.isPrivate ? Icons.lock_outline : Icons.lock_open,
+                      size: 16,
+                      color: Colors.white,
+                    ),
                   ),
                 ),
               ),
-            ),
             // Top left: primary badge
             if (isPrimary)
               Positioned(

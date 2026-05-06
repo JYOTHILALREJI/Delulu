@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../components/delulu_nav_bar.dart';
 import '../../services/api_service.dart';
 import '../../theme/app_colors.dart';
+import '../discovery/discovery_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -24,7 +25,7 @@ class _HomeScreenState extends State<HomeScreen> {
           IndexedStack(
             index: _currentIndex,
             children: const [
-              _VibesTab(),
+              DiscoveryScreen(),
               _SignalsTab(),
               _WhispersTab(),
               _AuraTab(),
@@ -43,57 +44,6 @@ class _HomeScreenState extends State<HomeScreen> {
 }
 
 // ── Placeholder Tabs ──
-
-class _VibesTab extends StatelessWidget {
-  const _VibesTab({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: const BoxDecoration(
-        gradient: RadialGradient(
-          center: Alignment.center,
-          radius: 1.0,
-          colors: [AppColors.obsidianCenter, AppColors.obsidianEdge],
-        ),
-      ),
-      child: const Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.auto_awesome,
-              size: 48,
-              color: AppColors.primaryContainer,
-              shadows: [
-                Shadow(blurRadius: 20, color: AppColors.primaryContainer)
-              ],
-            ),
-            SizedBox(height: 16),
-            Text(
-              'Vibes',
-              style: TextStyle(
-                fontSize: 24,
-                fontWeight: FontWeight.w800,
-                color: AppColors.primary,
-                fontFamily: 'BeVietnamPro',
-              ),
-            ),
-            SizedBox(height: 8),
-            Text(
-              'Discovery reel coming next...',
-              style: TextStyle(
-                fontSize: 14,
-                color: AppColors.onSurfaceVariant,
-                fontFamily: 'BeVietnamPro',
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
 
 class _SignalsTab extends StatelessWidget {
   const _SignalsTab({super.key});
