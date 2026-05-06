@@ -5,6 +5,7 @@ const cors = require('cors');
 const authRoutes = require('./routes/auth');
 const onboardingRoutes = require('./routes/onboarding');
 const discoveryRoutes = require('./routes/discovery');
+const likesRoutes = require('./routes/likes');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -21,6 +22,7 @@ app.use(express.json({ limit: '10mb' }));
 app.use('/api/auth', authRoutes);
 app.use('/api/onboarding', onboardingRoutes);
 app.use('/api/discovery', discoveryRoutes);
+app.use('/api/likes', likesRoutes);
 
 // ── Health Check ──
 app.get('/api/health', (req, res) => {

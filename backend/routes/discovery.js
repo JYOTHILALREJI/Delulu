@@ -36,6 +36,7 @@ router.get('/feed', authMiddleware, async (req, res) => {
   try {
     const result = await db.query(`
       SELECT
+        u.id as id,
         p.display_name,
         p.age,
         p.gender,

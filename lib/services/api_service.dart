@@ -84,4 +84,22 @@ class ApiService {
         .get(Uri.parse('$baseUrl/discovery/feed'), headers: headers)
         .timeout(_timeout);
   }
+
+  static Future<http.Response> likeUser(String likedUserId) async {
+    final headers = await authHeaders();
+    return http
+        .post(
+          Uri.parse('$baseUrl/likes/like'),
+          headers: headers,
+          body: jsonEncode({'likedUserId': likedUserId}),
+        )
+        .timeout(_timeout);
+  }
+
+  static Future<http.Response> getLikedProfiles() async {
+    final headers = await authHeaders();
+    return http
+        .get(Uri.parse('$baseUrl/likes/liked'), headers: headers)
+        .timeout(_timeout);
+  }
 }

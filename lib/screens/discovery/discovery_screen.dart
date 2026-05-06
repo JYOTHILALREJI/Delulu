@@ -480,7 +480,25 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
                     color: Colors.transparent,
                     child: InkWell(
                       borderRadius: BorderRadius.circular(16),
-                      onTap: () {},
+                      onTap: () async {
+                        if (profile['is_liked'] == true) return;
+                        try {
+                          final res = await ApiService.likeUser(profile['id']);
+                          if (res.statusCode == 200 && mounted) {
+                            setState(() {
+                              _profiles[_currentProfileIndex]['is_liked'] = true;
+                            });
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Liked!'),
+                                backgroundColor: AppColors.tertiary,
+                                behavior: SnackBarBehavior.floating,
+                                duration: Duration(seconds: 1),
+                              ),
+                            );
+                          }
+                        } catch (_) {}
+                      },
                       child: Container(
                         height: 56,
                         decoration: BoxDecoration(
@@ -489,11 +507,15 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
                           border: Border.all(
                               color: Colors.white.withValues(alpha: 0.1)),
                         ),
-                        child: const Row(
+                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            Icon(Icons.favorite_border,
-                                color: AppColors.tertiary, size: 22),
+                            Icon(
+                                profile['is_liked'] == true
+                                    ? Icons.favorite
+                                    : Icons.favorite_border,
+                                color: AppColors.tertiary,
+                                size: 22),
                             SizedBox(width: 8),
                             Text(
                               'Like',

@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 import '../../components/delulu_nav_bar.dart';
 import '../../services/api_service.dart';
 import '../../theme/app_colors.dart';
 import '../discovery/discovery_screen.dart';
+import '../signals/signals_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -14,6 +14,7 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   int _currentIndex = 0;
+  final GlobalKey<SignalsScreenState> _signalsKey = GlobalKey<SignalsScreenState>();
 
   @override
   Widget build(BuildContext context) {
@@ -24,10 +25,10 @@ class _HomeScreenState extends State<HomeScreen> {
           // Tab Content
           IndexedStack(
             index: _currentIndex,
-            children: const [
-              DiscoveryScreen(),
-              _SignalsTab(),
-              _WhispersTab(),
+            children: [
+              const DiscoveryScreen(),
+              SignalsScreen(key: _signalsKey),
+              const _WhispersTab(),
               _AuraTab(),
             ],
           ),
@@ -35,7 +36,13 @@ class _HomeScreenState extends State<HomeScreen> {
           // Reusable Nav Bar
           DeluluNavBar(
             currentIndex: _currentIndex,
-            onTap: (index) => setState(() => _currentIndex = index),
+            onTap: (index) {
+              setState(() => _currentIndex = index);
+              if (index == 1) {
+                // Refresh signals when tab is clicked
+                _signalsKey.currentState?.fetchLiked();
+              }
+            },
           ),
         ],
       ),
@@ -44,25 +51,6 @@ class _HomeScreenState extends State<HomeScreen> {
 }
 
 // ── Placeholder Tabs ──
-
-class _SignalsTab extends StatelessWidget {
-  const _SignalsTab({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return const Center(
-      child: Text(
-        'Signals (Likes)',
-        style: TextStyle(
-          fontSize: 20,
-          fontWeight: FontWeight.w600,
-          color: AppColors.onSurface,
-          fontFamily: 'BeVietnamPro',
-        ),
-      ),
-    );
-  }
-}
 
 class _WhispersTab extends StatelessWidget {
   const _WhispersTab({super.key});

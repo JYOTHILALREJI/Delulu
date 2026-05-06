@@ -43,6 +43,17 @@ async function initDb() {
     `);
     console.log('  ✓ indexes');
 
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS likes (
+        id SERIAL PRIMARY KEY,
+        liker_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        liked_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(liker_user_id, liked_user_id)
+      );
+    `);
+    console.log('  ✓ likes');
+
     // Add display_name column if upgrading existing db
     try {
       await client.query(`
@@ -61,6 +72,7 @@ async function initDb() {
     client.release();
     await pool.end();
   }
+
 }
 
 initDb();
