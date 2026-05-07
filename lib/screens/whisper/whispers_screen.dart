@@ -7,6 +7,7 @@ import '../../../theme/app_colors.dart';
 import '../../../services/api_service.dart';
 import 'chat_screen.dart';
 import '../../../services/socket_service.dart';
+import '../../components/delulu_wavy_loader.dart';
 
 class WhispersScreen extends StatefulWidget {
   const WhispersScreen({super.key});
@@ -20,6 +21,7 @@ class WhispersScreenState extends State<WhispersScreen> {
   bool _isLoading = true;
   final Set<String> _onlineUsers = {};
   final Map<int, bool> _typingChannels = {};
+  final Map<String, ImageProvider> _avatarCache = {};
   StreamSubscription? _statusSub;
   StreamSubscription? _typingSub;
 
@@ -71,8 +73,25 @@ class WhispersScreenState extends State<WhispersScreen> {
       final res = await ApiService.getConnections();
       final body = jsonDecode(res.body);
       if (mounted) {
+        final List<dynamic> conns = body['connections'] ?? [];
+        
+        // Pre-cache avatars
+        for (var conn in conns) {
+          final profile = conn['profile'] as Map<String, dynamic>;
+          final photos = List<Map<String, dynamic>>.from(profile['photos'] ?? []);
+          final avatarUrl = photos.isNotEmpty ? photos[0]['url'] as String? : null;
+          
+          if (avatarUrl != null && !_avatarCache.containsKey(avatarUrl)) {
+            if (avatarUrl.startsWith('data:image')) {
+              _avatarCache[avatarUrl] = MemoryImage(base64Decode(avatarUrl.split(',').last));
+            } else {
+              _avatarCache[avatarUrl] = CachedNetworkImageProvider(avatarUrl);
+            }
+          }
+        }
+
         setState(() {
-          _connections = List<Map<String, dynamic>>.from(body['connections'] ?? []);
+          _connections = List<Map<String, dynamic>>.from(conns);
           _isLoading = false;
           // Initial online status sync
           for (var conn in _connections) {
@@ -103,7 +122,7 @@ class WhispersScreenState extends State<WhispersScreen> {
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
-      return const Center(child: CircularProgressIndicator(color: AppColors.primaryContainer));
+      return const Center(child: DeluluWavyLoader());
     }
 
     if (_connections.isEmpty) {
@@ -177,9 +196,7 @@ class WhispersScreenState extends State<WhispersScreen> {
                               width: 50, height: 50,
                               color: AppColors.surfaceContainerHigh,
                               child: avatarUrl != null && avatarUrl.isNotEmpty
-                                  ? (avatarUrl.startsWith('data:image')
-                                      ? Image.memory(base64Decode(avatarUrl.split(',').last), fit: BoxFit.cover)
-                                      : CachedNetworkImage(imageUrl: avatarUrl, fit: BoxFit.cover))
+                                  ? Image(image: _avatarCache[avatarUrl]!, fit: BoxFit.cover)
                                   : const Icon(Icons.person, color: AppColors.outlineVariant),
                             ),
                           ),

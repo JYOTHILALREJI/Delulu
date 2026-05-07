@@ -73,6 +73,21 @@ class ApiService {
         .timeout(_timeout);
   }
 
+  static Future<http.Response> updatePassword({
+    required String currentPassword,
+    required String newPassword,
+  }) async {
+    final headers = await authHeaders();
+    return http.put(
+      Uri.parse('$baseUrl/auth/update-password'),
+      headers: headers,
+      body: jsonEncode({
+        'currentPassword': currentPassword,
+        'newPassword': newPassword,
+      }),
+    ).timeout(_timeout);
+  }
+
   static Future<http.Response> saveProfile(Map<String, dynamic> data) async {
     final headers = await authHeaders();
     return http.put(
@@ -82,11 +97,27 @@ class ApiService {
     ).timeout(_timeout);
   }
 
-  static Future<http.Response> getDiscoveryFeed() async {
+  static Future<http.Response> getDiscoveryFeed({int? ageMin, int? ageMax, double? distanceMiles, int limit = 10, int offset = 0}) async {
     final headers = await authHeaders();
-    return http
-        .get(Uri.parse('$baseUrl/discovery/feed'), headers: headers)
-        .timeout(_timeout);
+    final queryParams = <String, String>{};
+    if (ageMin != null) queryParams['age_min'] = ageMin.toString();
+    if (ageMax != null) queryParams['age_max'] = ageMax.toString();
+    if (distanceMiles != null) queryParams['distance_miles'] = distanceMiles.toString();
+    queryParams['limit'] = limit.toString();
+    queryParams['offset'] = offset.toString();
+
+    final uri = Uri.parse('$baseUrl/discovery/feed').replace(queryParameters: queryParams);
+    return http.get(uri, headers: headers).timeout(_timeout);
+  }
+
+  static Future<http.Response> getDiscoveryStats() async {
+    final headers = await authHeaders();
+    return http.get(Uri.parse('$baseUrl/discovery/stats'), headers: headers).timeout(_timeout);
+  }
+
+  static Future<http.Response> getPublicProfile(String userId) async {
+    final headers = await authHeaders();
+    return http.get(Uri.parse('$baseUrl/discovery/profile/$userId'), headers: headers).timeout(_timeout);
   }
 
   static Future<http.Response> likeUser(String likedUserId) async {
@@ -172,12 +203,17 @@ class ApiService {
         .timeout(_timeout);
   }
 
-  static Future<http.Response> sendMessage(int channelId, String content) async {
+  static Future<http.Response> sendMessage(int channelId, String content, {String messageType = 'text', int? duration}) async {
     final headers = await authHeaders();
     return http
         .post(Uri.parse('$baseUrl/whispers/send'),
             headers: headers,
-            body: jsonEncode({'channelId': channelId, 'content': content}))
+            body: jsonEncode({
+              'channelId': channelId, 
+              'content': content,
+              'message_type': messageType,
+              'duration': duration
+            }))
         .timeout(_timeout);
   }
 
@@ -192,6 +228,38 @@ class ApiService {
     final headers = await authHeaders();
     return http
         .post(Uri.parse('$baseUrl/whispers/mark-read/$channelId'), headers: headers)
+        .timeout(_timeout);
+  }
+
+  static Future<http.Response> blockUser(String userId) async {
+    final headers = await authHeaders();
+    return http
+        .post(Uri.parse('$baseUrl/whispers/block'),
+            headers: headers, body: jsonEncode({'blockedUserId': userId}))
+        .timeout(_timeout);
+  }
+
+  static Future<http.Response> reportUser(String userId, String reason) async {
+    final headers = await authHeaders();
+    return http
+        .post(Uri.parse('$baseUrl/whispers/report'),
+            headers: headers,
+            body: jsonEncode({'reportedUserId': userId, 'reason': reason}))
+        .timeout(_timeout);
+  }
+
+  static Future<http.Response> unblockUser(String userId) async {
+    final headers = await authHeaders();
+    return http
+        .post(Uri.parse('$baseUrl/whispers/unblock'),
+            headers: headers, body: jsonEncode({'blockedUserId': userId}))
+        .timeout(_timeout);
+  }
+
+  static Future<http.Response> getBlockedUsers() async {
+    final headers = await authHeaders();
+    return http
+        .get(Uri.parse('$baseUrl/whispers/blocked'), headers: headers)
         .timeout(_timeout);
   }
 

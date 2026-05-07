@@ -72,16 +72,46 @@ io.on('connection', async (socket) => {
     const { peerId } = data;
     if (!userId || !peerId) return;
 
-    console.log(`Attention seeker from ${userId} to ${peerId}`);
+    // Check if peer is online
+    if (!onlineTracker.isOnline(peerId)) {
+      socket.emit('error_message', { message: 'User is not online' });
+      return;
+    }
 
     try {
+      // Fetch user's last use and premium status
+      const userRes = await db.query(
+        'SELECT last_attention_seeker_at, is_premium FROM profiles WHERE user_id = $1',
+        [userId]
+      );
+      
+      if (userRes.rows.length > 0) {
+        const { last_attention_seeker_at, is_premium } = userRes.rows[0];
+        if (last_attention_seeker_at) {
+          const lastUse = new Date(last_attention_seeker_at);
+          const now = new Date();
+          const diffMs = now - lastUse;
+          const cooldownMs = is_premium ? 30 * 60 * 1000 : 7 * 24 * 60 * 60 * 1000;
+          
+          if (diffMs < cooldownMs) {
+            socket.emit('error_message', { 
+              message: 'Attention Seeker is on cooldown',
+              type: 'attention_cooldown'
+            });
+            return;
+          }
+        }
+      }
+
+      console.log(`Attention seeker from ${userId} to ${peerId}`);
+
       // Update last use in DB
       await db.query(
         'UPDATE profiles SET last_attention_seeker_at = NOW() WHERE user_id = $1',
         [userId]
       );
 
-      // Relay to peer (peer is in their own room named peerId)
+      // Relay to peer
       io.to(peerId).emit('attention_seeker_received', { fromId: userId });
     } catch (err) {
       console.error('Attention seeker error:', err);

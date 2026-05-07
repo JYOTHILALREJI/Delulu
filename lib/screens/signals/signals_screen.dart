@@ -5,6 +5,8 @@ import 'package:cached_network_image/cached_network_image.dart';
 import '../../../theme/app_colors.dart';
 import '../../../services/api_service.dart';
 import '../discovery/profile_detail_screen.dart';
+import '../aura/public_aura_screen.dart';
+import '../../components/delulu_wavy_loader.dart';
 
 class SignalsScreen extends StatefulWidget {
   const SignalsScreen({super.key});
@@ -189,7 +191,7 @@ class SignalsScreenState extends State<SignalsScreen> {
             padding: const EdgeInsets.only(top: 16, left: 20, right: 20, bottom: 8),
             child: Row(
               children: [
-                Icon(Icons.bolt, color: AppColors.primary, size: 28),
+                Icon(Icons.favorite, color: AppColors.primary, size: 28),
                 const SizedBox(width: 8),
                 Text(
                   'Signals',
@@ -206,7 +208,7 @@ class SignalsScreenState extends State<SignalsScreen> {
             child: AnimatedSwitcher(
               duration: const Duration(milliseconds: 400),
               child: _isLoading
-                ? const Center(key: ValueKey('loading'), child: CircularProgressIndicator(color: AppColors.primaryContainer))
+                ? const Center(key: ValueKey('loading'), child: DeluluWavyLoader())
                 : (_likedProfiles.isEmpty
                     ? _buildEmptyState()
                     : RefreshIndicator(
@@ -254,7 +256,7 @@ class SignalsScreenState extends State<SignalsScreen> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.bolt, size: 48,
+          Icon(Icons.favorite_outline, size: 48,
               color: AppColors.onSurfaceVariant.withValues(alpha: 0.3)),
           const SizedBox(height: 16),
           Text(
@@ -304,10 +306,13 @@ class SignalsScreenState extends State<SignalsScreen> {
             children: [
               GestureDetector(
                 behavior: HitTestBehavior.opaque,
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => ProfileDetailScreen(profile: profile)),
-                ),
+                onTap: () async {
+                  await Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => PublicAuraScreen(userId: profile['id'].toString())),
+                  );
+                  fetchLiked(); // Refresh after coming back
+                },
                 child: Row(
                   children: [
                     // Profile photo

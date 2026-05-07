@@ -5,6 +5,8 @@ import 'package:cached_network_image/cached_network_image.dart';
 import '../../../theme/app_colors.dart';
 import '../../../services/api_service.dart';
 import '../profileRequest/profile_request_view_screen.dart';
+import '../aura/public_aura_screen.dart';
+import '../../components/delulu_wavy_loader.dart';
 
 class PingsScreen extends StatefulWidget {
   const PingsScreen({super.key});
@@ -211,7 +213,7 @@ class PingsScreenState extends State<PingsScreen> {
               child: _isLoading
                 ? const Center(
                     key: ValueKey('loading'),
-                    child: CircularProgressIndicator(color: AppColors.primaryContainer),
+                    child: DeluluWavyLoader(),
                   )
                 : (_requests.isEmpty
                     ? SizedBox(
@@ -316,14 +318,26 @@ class _RequestCardState extends State<RequestCard> {
               // Photo - Clicking opens profile
               GestureDetector(
                 onTap: () {
-                  Navigator.push(context, MaterialPageRoute(
-                    builder: (_) => ProfileRequestViewScreen(
-                      requestId: requestId,
-                      profile: sender,
-                      onAccept: widget.onAccept,
-                      onReject: widget.onReject,
-                    ),
-                  ));
+                  if (widget.isHistory) {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => PublicAuraScreen(userId: sender['id']),
+                      ),
+                    );
+                  } else {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => ProfileRequestViewScreen(
+                          requestId: requestId,
+                          profile: sender,
+                          onAccept: widget.onAccept,
+                          onReject: widget.onReject,
+                        ),
+                      ),
+                    );
+                  }
                 },
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(14),
@@ -346,14 +360,26 @@ class _RequestCardState extends State<RequestCard> {
                     // Name - Clicking opens profile
                     GestureDetector(
                       onTap: () {
-                        Navigator.push(context, MaterialPageRoute(
-                          builder: (_) => ProfileRequestViewScreen(
-                            requestId: requestId,
-                            profile: sender,
-                            onAccept: widget.onAccept,
-                            onReject: widget.onReject,
-                          ),
-                        ));
+                        if (widget.isHistory) {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => PublicAuraScreen(userId: sender['id']),
+                            ),
+                          );
+                        } else {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => ProfileRequestViewScreen(
+                                requestId: requestId,
+                                profile: sender,
+                                onAccept: widget.onAccept,
+                                onReject: widget.onReject,
+                              ),
+                            ),
+                          );
+                        }
                       },
                       child: Text(
                         '${sender['display_name']}, ${sender['age']}',

@@ -17,6 +17,7 @@ class SocketService {
   final _typingController = StreamController<Map<String, dynamic>>.broadcast();
   final _statusController = StreamController<Map<String, dynamic>>.broadcast();
   final _attentionController = StreamController<Map<String, dynamic>>.broadcast();
+  final _errorController = StreamController<Map<String, dynamic>>.broadcast();
 
   Stream<Map<String, dynamic>> get messageStream => _messageController.stream;
   Stream<Map<String, dynamic>> get unreadStream => _unreadController.stream;
@@ -24,6 +25,7 @@ class SocketService {
   Stream<Map<String, dynamic>> get typingStream => _typingController.stream;
   Stream<Map<String, dynamic>> get statusStream => _statusController.stream;
   Stream<Map<String, dynamic>> get attentionStream => _attentionController.stream;
+  Stream<Map<String, dynamic>> get errorStream => _errorController.stream;
 
   bool get connected => _socket?.connected ?? false;
 
@@ -89,6 +91,10 @@ class SocketService {
       _attentionController.add(data);
     });
 
+    _socket!.on('error_message', (data) {
+      _errorController.add(data);
+    });
+
     _socket!.onConnectError((err) => print('Socket Connect Error: $err'));
     _socket!.onError((err) => print('Socket Error: $err'));
   }
@@ -105,6 +111,7 @@ class SocketService {
     _typingController.close();
     _statusController.close();
     _attentionController.close();
+    _errorController.close();
     disconnect();
   }
 }

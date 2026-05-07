@@ -198,9 +198,10 @@ class _VerificationCameraScreenState extends State<VerificationCameraScreen> {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(message),
-        backgroundColor: AppColors.error,
+        content: Text(message, style: TextStyle(color: AppColors.onPrimary, fontWeight: FontWeight.w600)),
+        backgroundColor: AppColors.toastBackground,
         behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
     );
   }

@@ -7,6 +7,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:http/http.dart' as http;
 import '../../theme/app_colors.dart';
 import '../../services/api_service.dart';
+import '../../utils/interests_data.dart';
 
 class PhotoItem {
   final String path;
@@ -54,6 +55,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   final List<String> _genderOptions = ['Non-Binary', 'Woman', 'Man'];
   final List<String> _seekingOptions = ['Everyone', 'Women', 'Men'];
+  List<String> _suggestedInterests = [];
 
   // Scroll control
   final ScrollController _scrollController = ScrollController();
@@ -75,6 +77,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     } else {
       _fetchDisplayName();
     }
+    _suggestedInterests = InterestsData.getRandomInterests(10);
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
@@ -206,7 +209,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         .toList();
     setState(() {
       for (final tag in tags) {
-        if (!_interests.contains(tag) && _interests.length < 15) {
+        if (!_interests.contains(tag) && _interests.length < 10) {
           _interests.add(tag);
         }
       }
@@ -742,7 +745,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
-                  '${_interests.length}/15 added',
+                  '${_interests.length}/10 added',
                   style: GoogleFonts.inter(
                     fontSize: 11,
                     color: AppColors.outline.withValues(alpha: 0.6),
@@ -805,17 +808,13 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           Wrap(
             spacing: 8,
             runSpacing: 8,
-            children: [
-              'Travel', 'Coffee', 'Music', 'Art', 'Photography',
-              'Hiking', 'Cooking', 'Reading', 'Gaming', 'Yoga',
-              'Nightlife', 'Architecture', 'Jazz', 'Vinyl', 'Cinema',
-            ].map((suggestion) {
+            children: _suggestedInterests.map((suggestion) {
               final isAdded = _interests.contains(suggestion.toUpperCase());
               return GestureDetector(
                 onTap: () {
                   if (isAdded) {
                     _removeInterest(suggestion.toUpperCase());
-                  } else if (_interests.length < 15) {
+                  } else if (_interests.length < 10) {
                     setState(() => _interests.add(suggestion.toUpperCase()));
                   }
                 },

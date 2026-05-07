@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../theme/app_colors.dart';
 import '../../services/api_service.dart';
+import '../../components/delulu_wavy_loader.dart';
 
 class VisionBoardScreen extends StatefulWidget {
   const VisionBoardScreen({super.key});
@@ -138,7 +139,7 @@ class _VisionBoardScreenState extends State<VisionBoardScreen> {
         ),
       ),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
+          ? const Center(child: DeluluWavyLoader())
           : Padding(
               padding: const EdgeInsets.all(16.0),
               child: GridView.builder(
@@ -168,7 +169,11 @@ class _VisionBoardScreenState extends State<VisionBoardScreen> {
                             children: [
                               url.startsWith('data:image')
                                   ? Image.memory(base64Decode(url.split(',').last), fit: BoxFit.cover)
-                                  : CachedNetworkImage(imageUrl: url, fit: BoxFit.cover),
+                                  : CachedNetworkImage(
+                                      imageUrl: url, 
+                                      fit: BoxFit.cover,
+                                      placeholder: (context, url) => const Center(child: DeluluWavyLoader(fontSize: 14)),
+                                    ),
                               if (isBlurred)
                                 BackdropFilter(
                                   filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),

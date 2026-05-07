@@ -67,7 +67,7 @@ class _DeluluNavBarState extends State<DeluluNavBar> {
   Widget build(BuildContext context) {
     final items = [
       _NavItem(icon: Icons.auto_awesome, label: 'Vibes'),
-      _NavItem(icon: Icons.bolt, label: 'Signals'),
+      _NavItem(icon: Icons.favorite_outline, label: 'Signals'),
       _NavItem(icon: Icons.person_add_outlined, label: 'Pings'),   // new tab
       _NavItem(icon: Icons.mark_unread_chat_alt_outlined, label: 'Whispers'),
       _NavItem(icon: Icons.spoke_outlined, label: 'Aura'),

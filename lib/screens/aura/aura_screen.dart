@@ -11,15 +11,18 @@ import '../../services/verification_service.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:geocoding/geocoding.dart';
 import 'dart:math';
+import 'edit_profile_screen.dart';
+import 'blocked_profiles_screen.dart';
+import '../../components/delulu_wavy_loader.dart';
 
 class AuraScreen extends StatefulWidget {
   const AuraScreen({super.key});
 
   @override
-  State<AuraScreen> createState() => _AuraScreenState();
+  State<AuraScreen> createState() => AuraScreenState();
 }
 
-class _AuraScreenState extends State<AuraScreen> {
+class AuraScreenState extends State<AuraScreen> {
   bool _isLoading = true;
   Map<String, dynamic>? _profile;
   
@@ -35,7 +38,7 @@ class _AuraScreenState extends State<AuraScreen> {
   @override
   void initState() {
     super.initState();
-    _loadProfile();
+    loadProfile();
     _loadAppVersion();
   }
 
@@ -61,7 +64,8 @@ class _AuraScreenState extends State<AuraScreen> {
     }
   }
 
-  Future<void> _loadProfile() async {
+  Future<void> loadProfile() async {
+    setState(() => _isLoading = true);
     try {
       final res = await ApiService.getMe();
       if (res.statusCode == 200) {
@@ -100,7 +104,7 @@ class _AuraScreenState extends State<AuraScreen> {
       await ApiService.saveProfile({key: value});
     } catch (e) {
       // Revert if failed
-      _loadProfile();
+      loadProfile();
     }
   }
 
@@ -225,7 +229,7 @@ class _AuraScreenState extends State<AuraScreen> {
     if (_isLoading) {
       return const Scaffold(
         backgroundColor: AppColors.obsidianEdge,
-        body: Center(child: CircularProgressIndicator(color: AppColors.primary)),
+        body: Center(child: DeluluWavyLoader()),
       );
     }
 
@@ -248,14 +252,53 @@ class _AuraScreenState extends State<AuraScreen> {
           children: [
             Align(
               alignment: Alignment.centerLeft,
-              child: Text(
-                'Your Aura',
-                style: GoogleFonts.beVietnamPro(
-                  fontSize: 32,
-                  fontWeight: FontWeight.w800,
-                  color: AppColors.onSurface,
-                  letterSpacing: -1,
-                ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Your Aura',
+                    style: GoogleFonts.beVietnamPro(
+                      fontSize: 32,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.onSurface,
+                      letterSpacing: -1,
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () {
+                      if (_profile != null) {
+                        Navigator.push(
+                          context,
+                          PageRouteBuilder(
+                            pageBuilder: (context, animation, secondaryAnimation) =>
+                                EditProfileScreen(profile: _profile!),
+                            transitionsBuilder: (context, animation, secondaryAnimation, child) {
+                              const begin = Offset(0.0, 1.0);
+                              const end = Offset.zero;
+                              const curve = Curves.easeOutCubic;
+
+                              var trait = Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
+                              var offsetAnimation = animation.drive(trait);
+
+                              return SlideTransition(
+                                position: offsetAnimation,
+                                child: FadeTransition(
+                                  opacity: animation,
+                                  child: child,
+                                ),
+                              );
+                            },
+                            transitionDuration: const Duration(milliseconds: 500),
+                          ),
+                        ).then((updated) {
+                          if (updated == true) loadProfile();
+                        });
+                      }
+                    },
+                    icon: const Icon(Icons.edit_note, color: AppColors.primary, size: 28),
+                    tooltip: 'Edit Profile',
+                  ),
+                ],
               ),
             ),
             const SizedBox(height: 32),
@@ -352,12 +395,20 @@ class _AuraScreenState extends State<AuraScreen> {
                 onTap: () => Navigator.push(
                   context,
                   MaterialPageRoute(builder: (_) => const VisionBoardScreen()),
-                ).then((_) => _loadProfile()),
+                ).then((_) => loadProfile()),
               ),
             ]),
 
             const SizedBox(height: 24),
-            _buildSettingsGroup('Identity', [
+            _buildSettingsGroup('Privacy & Security', [
+              _buildNavTile(
+                icon: Icons.block,
+                label: 'Blocked Profiles',
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const BlockedProfilesScreen()),
+                ),
+              ),
               _buildNavTile(
                 icon: Icons.verified_user,
                 label: 'Verify Yourself',

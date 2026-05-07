@@ -60,9 +60,10 @@ class _SignupScreenState extends State<SignupScreen> {
   void _showError(String msg) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(msg),
-        backgroundColor: AppColors.errorContainer,
+        content: Text(msg, style: TextStyle(color: AppColors.onPrimary, fontWeight: FontWeight.w600)),
+        backgroundColor: AppColors.toastBackground,
         behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
     );
   }

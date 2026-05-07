@@ -20,9 +20,11 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   int _currentIndex = 0;
   int _unreadCount = 0;
+  final GlobalKey<DiscoveryScreenState> _discoveryKey = GlobalKey<DiscoveryScreenState>();
   final GlobalKey<SignalsScreenState> _signalsKey = GlobalKey<SignalsScreenState>();
   final GlobalKey<PingsScreenState> _pingsKey = GlobalKey<PingsScreenState>();
   final GlobalKey<WhispersScreenState> _whispersKey = GlobalKey<WhispersScreenState>();
+  final GlobalKey<AuraScreenState> _auraKey = GlobalKey<AuraScreenState>();
 
   @override
   void initState() {
@@ -40,9 +42,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
-    // We might want to keep the socket alive while the app is in foreground
-    // but definitely dispose of any listeners if they were separate.
-    // For now, let the singleton handle its lifecycle.
     super.dispose();
   }
 
@@ -52,7 +51,6 @@ class _HomeScreenState extends State<HomeScreen> {
       if (res.statusCode == 200) {
         final body = jsonDecode(res.body);
         final count = body['total_unread'] ?? 0;
-        print('DEBUG: Fetched unread count: $count');
         if (mounted) {
           setState(() {
             _unreadCount = count;
@@ -74,11 +72,11 @@ class _HomeScreenState extends State<HomeScreen> {
           IndexedStack(
             index: _currentIndex,
             children: [
-              const DiscoveryScreen(),
+              DiscoveryScreen(key: _discoveryKey),
               SignalsScreen(key: _signalsKey),
               PingsScreen(key: _pingsKey),
               WhispersScreen(key: _whispersKey),
-              const AuraScreen(),
+              AuraScreen(key: _auraKey),
             ],
           ),
 
@@ -89,15 +87,18 @@ class _HomeScreenState extends State<HomeScreen> {
             onTap: (index) {
               setState(() => _currentIndex = index);
               _fetchUnreadCount(); // Refresh unread count on any tab change
-              if (index == 1) {
-                // Refresh signals when tab is clicked
+              
+              // Trigger explicit refresh for each screen
+              if (index == 0) {
+                _discoveryKey.currentState?.refreshFeed();
+              } else if (index == 1) {
                 _signalsKey.currentState?.fetchLiked();
               } else if (index == 2) {
-                // Refresh pings when tab is clicked
                 _pingsKey.currentState?.fetchRequests();
               } else if (index == 3) {
-                // Refresh whispers when tab is clicked
                 _whispersKey.currentState?.fetchConnections();
+              } else if (index == 4) {
+                _auraKey.currentState?.loadProfile();
               }
             },
           ),

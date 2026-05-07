@@ -151,7 +151,7 @@ router.get('/messages/:channelId', authMiddleware, async (req, res) => {
         }
 
         const messages = await db.query(
-            `SELECT id, sender_id, content, created_at, read_at
+            `SELECT id, sender_id, content, message_type, duration, created_at, read_at
        FROM messages
        WHERE channel_id = $1
        ORDER BY created_at ASC
@@ -164,6 +164,8 @@ router.get('/messages/:channelId', authMiddleware, async (req, res) => {
                 id: m.id,
                 sender_id: m.sender_id,
                 content: m.content,
+                message_type: m.message_type,
+                duration: m.duration,
                 created_at: m.created_at,
                 read_at: m.read_at,
             }))
@@ -178,7 +180,7 @@ router.get('/messages/:channelId', authMiddleware, async (req, res) => {
 router.post('/send', authMiddleware, async (req, res) => {
     try {
         const senderId = req.userId;
-        const { channelId, content } = req.body;
+        const { channelId, content, message_type, duration } = req.body;
 
         if (!channelId || !content || content.trim().length === 0) {
             return res.status(400).json({ error: 'channelId and content required' });
@@ -197,24 +199,38 @@ router.post('/send', authMiddleware, async (req, res) => {
             return res.status(403).json({ error: 'Access denied' });
         }
 
+        const peerId = user1_id === senderId ? user2_id : user1_id;
+
+        // Check if blocked
+        const blockCheck = await db.query(
+            `SELECT 1 FROM blocks 
+             WHERE (blocker_id = $1 AND blocked_id = $2) 
+                OR (blocker_id = $2 AND blocked_id = $1)`,
+            [senderId, peerId]
+        );
+        if (blockCheck.rows.length > 0) {
+            return res.status(403).json({ error: 'User is blocked' });
+        }
+
         const result = await db.query(
-            `INSERT INTO messages (channel_id, sender_id, content)
-       VALUES ($1, $2, $3)
+            `INSERT INTO messages (channel_id, sender_id, content, message_type, duration)
+       VALUES ($1, $2, $3, $4, $5)
        RETURNING id, created_at`,
-            [channelId, senderId, content.trim()]
+            [channelId, senderId, content.trim(), message_type || 'text', duration || null]
         );
 
         const message = {
             id: result.rows[0].id,
             sender_id: senderId,
             content: content.trim(),
+            message_type: message_type || 'text',
+            duration: duration || null,
             created_at: result.rows[0].created_at,
             channel_id: channelId
         };
 
         // Emit to peer
         const io = socketManager.getIo();
-        const peerId = user1_id === senderId ? user2_id : user1_id;
         io.to(peerId).emit('new_message', message);
         // Also notify me to update my list preview/sorting
         io.to(senderId).emit('new_message', message);
@@ -222,6 +238,98 @@ router.post('/send', authMiddleware, async (req, res) => {
         res.json({ message });
     } catch (err) {
         console.error('Send message error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Block a user
+router.post('/block', authMiddleware, async (req, res) => {
+    try {
+        const userId = req.userId;
+        const { blockedUserId } = req.body;
+        if (!blockedUserId) return res.status(400).json({ error: 'blockedUserId required' });
+
+        await db.query(
+            `INSERT INTO blocks (blocker_id, blocked_id) VALUES ($1, $2)
+       ON CONFLICT DO NOTHING`,
+            [userId, blockedUserId]
+        );
+
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Unblock a user
+router.post('/unblock', authMiddleware, async (req, res) => {
+    try {
+        const userId = req.userId;
+        const { blockedUserId } = req.body;
+        if (!blockedUserId) return res.status(400).json({ error: 'blockedUserId required' });
+
+        await db.query(
+            `DELETE FROM blocks WHERE blocker_id = $1 AND blocked_id = $2`,
+            [userId, blockedUserId]
+        );
+
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Report a user
+router.post('/report', authMiddleware, async (req, res) => {
+    try {
+        const userId = req.userId;
+        const { reportedUserId, reason } = req.body;
+        if (!reportedUserId || !reason) return res.status(400).json({ error: 'reportedUserId and reason required' });
+
+        await db.query(
+            `INSERT INTO reports (reporter_id, reported_id, reason) VALUES ($1, $2, $3)`,
+            [userId, reportedUserId, reason]
+        );
+
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Get list of blocked users
+router.get('/blocked', authMiddleware, async (req, res) => {
+    try {
+        const userId = req.userId;
+        const result = await db.query(
+            `SELECT u.id, p.display_name, p.photos, b.created_at
+             FROM blocks b
+             JOIN users u ON b.blocked_id = u.id
+             JOIN profiles p ON p.user_id = u.id
+             WHERE b.blocker_id = $1
+             ORDER BY b.created_at DESC`,
+            [userId]
+        );
+
+        const blocked = result.rows.map(row => {
+            const parseJson = (val) => {
+                if (!val) return [];
+                if (typeof val === 'string') {
+                    try { return JSON.parse(val); } catch (_) { return []; }
+                }
+                return val;
+            };
+            return {
+                id: row.id,
+                display_name: row.display_name,
+                photos: parseJson(row.photos),
+                blocked_at: row.created_at
+            };
+        });
+
+        res.json({ blocked });
+    } catch (err) {
+        console.error('Fetch blocked users error:', err);
         res.status(500).json({ error: 'Internal server error' });
     }
 });

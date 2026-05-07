@@ -45,4 +45,5 @@ class AppColors {
 
   static const Color obsidianCenter = Color(0xFF1E002E);
   static const Color obsidianEdge = Color(0xFF0C0E12);
+  static const Color toastBackground = Color(0xFFEFB2F7);
 }

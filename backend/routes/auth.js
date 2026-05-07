@@ -117,8 +117,40 @@ router.get('/me', authMiddleware, async (req, res) => {
     }
 
     const row = result.rows[0];
-    // Use profile_name if onboarded, otherwise use users.display_name
+
+    // Fetch connection count
+    const connResult = await db.query(
+      `SELECT COUNT(*) as count FROM connection_requests 
+       WHERE (sender_id = $1 OR receiver_id = $1) AND status = 'accepted'`,
+      [req.userId]
+    );
+    const connectCount = parseInt(connResult.rows[0].count);
+
+    // Calculate Aura Score (Matching %)
+    let auraScore = 40; // Base
+    if (row.bio && row.bio.length > 10) auraScore += 15;
+    
+    let interests = [];
+    try {
+      interests = typeof row.interests === 'string' ? JSON.parse(row.interests) : (row.interests || []);
+    } catch (_) {}
+    if (interests.length > 0) auraScore += 15;
+
+    let photos = [];
+    try {
+      photos = typeof row.photos === 'string' ? JSON.parse(row.photos) : (row.photos || []);
+    } catch (_) {}
+    if (photos.length > 1) auraScore += 10;
+    if (row.is_verified) auraScore += 5;
+
+    // Connection bonus: 3% per connection, max 15%
+    auraScore += Math.min(connectCount * 3, 15);
+    
+    // Cap at 100
+    auraScore = Math.min(auraScore, 100);
+
     res.json({
+      server_time: new Date().toISOString(),
       user: {
         id: row.id,
         email: row.email,
@@ -141,6 +173,8 @@ router.get('/me', authMiddleware, async (req, res) => {
         location_name: row.location_name,
         is_premium: row.is_premium,
         last_attention_seeker_at: row.last_attention_seeker_at,
+        connect_count: connectCount,
+        aura_score: auraScore
       },
     });
   } catch (err) {
@@ -151,6 +185,42 @@ router.get('/me', authMiddleware, async (req, res) => {
 
 router.post('/logout', authMiddleware, (req, res) => {
   res.json({ message: 'Logged out' });
+});
+
+// ── Update Password ──
+router.put('/update-password', authMiddleware, async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    const userId = req.userId;
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ error: 'Current and new password required' });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({ error: 'New password must be at least 6 characters' });
+    }
+
+    const result = await db.query('SELECT password_hash FROM users WHERE id = $1', [userId]);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const user = result.rows[0];
+    const valid = await bcrypt.compare(currentPassword, user.password_hash);
+
+    if (!valid) {
+      return res.status(401).json({ error: 'Invalid current password' });
+    }
+
+    const hash = await bcrypt.hash(newPassword, SALT_ROUNDS);
+    await db.query('UPDATE users SET password_hash = $1 WHERE id = $2', [hash, userId]);
+
+    res.json({ success: true, message: 'Password updated successfully' });
+  } catch (err) {
+    console.error('Update password error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 module.exports = router;
