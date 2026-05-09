@@ -41,6 +41,7 @@ async function initDb() {
         is_premium BOOLEAN DEFAULT FALSE,
         last_attention_seeker_at TIMESTAMPTZ,
         last_seen_at TIMESTAMPTZ,
+        likes_count INTEGER DEFAULT 0,
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
     `);
@@ -117,7 +118,8 @@ async function initDb() {
       { name: 'location_name', type: 'VARCHAR(255) DEFAULT \'\'' },
       { name: 'is_premium', type: 'BOOLEAN DEFAULT FALSE' },
       { name: 'last_attention_seeker_at', type: 'TIMESTAMPTZ' },
-      { name: 'last_seen_at', type: 'TIMESTAMPTZ' }
+      { name: 'last_seen_at', type: 'TIMESTAMPTZ' },
+      { name: 'likes_count', type: 'INTEGER DEFAULT 0' }
     ];
 
     for (const col of profileColumns) {

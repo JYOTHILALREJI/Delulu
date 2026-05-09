@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -34,6 +35,7 @@ class AuraScreenState extends State<AuraScreen> {
   bool _liveLocationEnabled = false;
   bool _isVerified = false;
   String _appVersion = '';
+  bool _isBioExpanded = false;
 
   @override
   void initState() {
@@ -241,266 +243,347 @@ class AuraScreenState extends State<AuraScreen> {
     final List<dynamic> photos = _profile?['photos'] != null 
         ? (_profile!['photos'] is String ? jsonDecode(_profile!['photos']) : _profile!['photos'])
         : [];
-    final primaryPhoto = photos.firstWhere((p) => p['is_primary'] == true, orElse: () => photos.isNotEmpty ? photos[0] : null);
+    final primaryPhoto = photos.isNotEmpty 
+        ? photos.firstWhere((p) => p['is_primary'] == true, orElse: () => photos[0])
+        : null;
     final avatarUrl = primaryPhoto?['url'];
 
     return Scaffold(
       backgroundColor: AppColors.obsidianEdge,
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(20, 60, 20, 100),
-        child: Column(
+      body: SafeArea(
+        bottom: false,
+        child: Stack(
           children: [
-            Align(
-              alignment: Alignment.centerLeft,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    'Your Aura',
-                    style: GoogleFonts.beVietnamPro(
-                      fontSize: 32,
-                      fontWeight: FontWeight.w800,
-                      color: AppColors.onSurface,
-                      letterSpacing: -1,
-                    ),
+            // Background Image
+            Positioned.fill(
+              child: avatarUrl != null
+                ? (avatarUrl.startsWith('data:image')
+                    ? Image.memory(base64Decode(avatarUrl.split(',').last), fit: BoxFit.cover)
+                    : CachedNetworkImage(imageUrl: avatarUrl, fit: BoxFit.cover))
+                : Container(color: AppColors.obsidianEdge),
+            ),
+            
+            // Gradient Overlay to ensure text readability
+            Positioned.fill(
+              child: Container(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.black.withValues(alpha: 0.1),
+                      Colors.black.withValues(alpha: 0.8),
+                    ],
                   ),
-                  IconButton(
-                    onPressed: () {
-                      if (_profile != null) {
-                        Navigator.push(
-                          context,
-                          PageRouteBuilder(
-                            pageBuilder: (context, animation, secondaryAnimation) =>
-                                EditProfileScreen(profile: _profile!),
-                            transitionsBuilder: (context, animation, secondaryAnimation, child) {
-                              const begin = Offset(0.0, 1.0);
-                              const end = Offset.zero;
-                              const curve = Curves.easeOutCubic;
-
-                              var trait = Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
-                              var offsetAnimation = animation.drive(trait);
-
-                              return SlideTransition(
-                                position: offsetAnimation,
-                                child: FadeTransition(
-                                  opacity: animation,
-                                  child: child,
-                                ),
-                              );
-                            },
-                            transitionDuration: const Duration(milliseconds: 500),
-                          ),
-                        ).then((updated) {
-                          if (updated == true) loadProfile();
-                        });
-                      }
-                    },
-                    icon: const Icon(Icons.edit_note, color: AppColors.primary, size: 28),
-                    tooltip: 'Edit Profile',
-                  ),
-                ],
+                ),
               ),
             ),
-            const SizedBox(height: 32),
-            _buildProfileHeader(avatarUrl, displayName, age, bio),
-            const SizedBox(height: 32),
-            
-            _buildSettingsGroup('Gatekeeping', [
-              _buildToggleTile(
-                icon: Icons.visibility,
-                label: 'Online Status',
-                value: _onlineEnabled,
-                onChanged: (v) => _updateSetting('online_status_enabled', v),
-              ),
-              _buildToggleTile(
-                icon: Icons.keyboard,
-                label: 'Typing Indicator',
-                value: _typingEnabled,
-                onChanged: (v) => _updateSetting('typing_indicator_enabled', v),
-              ),
-              _buildToggleTile(
-                icon: Icons.access_time,
-                label: 'Last Seen',
-                value: _lastSeenEnabled,
-                onChanged: (v) => _updateSetting('last_seen_enabled', v),
-              ),
-              _buildToggleTile(
-                icon: Icons.done_all,
-                label: 'Read Receipts',
-                value: _readReceiptEnabled,
-                onChanged: (v) => _updateSetting('read_receipt_enabled', v),
-              ),
-              _buildToggleTile(
-                icon: Icons.near_me,
-                label: 'Share Location',
-                subtitle: 'Share your location to meet a real Delulu!',
-                value: _liveLocationEnabled,
-                onChanged: _handleLocationToggle,
-              ),
-              if (_liveLocationEnabled && _profile?['latitude'] != null)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(72, 0, 16, 16),
-                  child: Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: AppColors.primary.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: AppColors.primary.withOpacity(0.2)),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.my_location, size: 14, color: AppColors.primary),
-                        const SizedBox(width: 8),
-                        Expanded(
+
+            // Main Content
+            Positioned.fill(
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  return SingleChildScrollView(
+                    physics: const BouncingScrollPhysics(),
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                      child: IntrinsicHeight(
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(20, 20, 20, 100),
                           child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
-                                'Visible Location: ${_profile?['location_name'] ?? 'Finding...'}',
-                                style: GoogleFonts.inter(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w700,
-                                  color: AppColors.primary,
-                                ),
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                '${_profile?['latitude']}, ${_profile?['longitude']}',
-                                style: GoogleFonts.inter(
-                                  fontSize: 10,
-                                  color: AppColors.primary.withOpacity(0.7),
-                                ),
-                              ),
+                              _buildAuraTitle(),
+                              const Spacer(),
+                              const SizedBox(height: 32),
+                  
+                  // Glass Card for Profile Details
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(32),
+                    child: BackdropFilter(
+                      filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.08),
+                          borderRadius: BorderRadius.circular(32),
+                          border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+                        ),
+                        child: Column(
+                          children: [
+                            _buildProfileHeader(displayName, age),
+                            const SizedBox(height: 20),
+                            
+                            _buildStatsSection(
+                              connections: _profile?['connect_count'] ?? 0,
+                              likes: _profile?['likes_count'] ?? 0,
+                              auraScore: _profile?['aura_score'] ?? 0,
+                            ),
+                            
+                            const SizedBox(height: 20),
+                            _buildBioSection(bio),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                              const SizedBox(height: 16),
+                              _buildEditProfileButton(),
+                              const SizedBox(height: 8),
                             ],
                           ),
                         ),
-                        IconButton(
-                          icon: const Icon(Icons.refresh, size: 18, color: AppColors.primary),
-                          onPressed: () => _handleLocationToggle(true),
-                          tooltip: 'Update Location',
-                          constraints: const BoxConstraints(),
-                          padding: EdgeInsets.zero,
-                        ),
-                      ],
+                      ),
                     ),
-                  ),
-                ),
-            ]),
-
-            const SizedBox(height: 24),
-            _buildSettingsGroup('Portfolio', [
-              _buildNavTile(
-                icon: Icons.auto_awesome_mosaic,
-                label: 'Vision Board',
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const VisionBoardScreen()),
-                ).then((_) => loadProfile()),
-              ),
-            ]),
-
-            const SizedBox(height: 24),
-            _buildSettingsGroup('Privacy & Security', [
-              _buildNavTile(
-                icon: Icons.block,
-                label: 'Blocked Profiles',
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const BlockedProfilesScreen()),
-                ),
-              ),
-              _buildNavTile(
-                icon: Icons.verified_user,
-                label: 'Verify Yourself',
-                subtitle: 'Verify yourself to get more matches and connection from Delulus.',
-                trailing: _isVerified ? 'VERIFIED' : 'PENDING',
-                trailingStyle: GoogleFonts.inter(
-                  fontSize: 10,
-                  fontWeight: FontWeight.w800,
-                  color: _isVerified ? Colors.greenAccent : AppColors.primary,
-                ),
-                onTap: _handleVerification,
-              ),
-            ]),
-
-            const SizedBox(height: 32),
-            _buildNavTile(
-              icon: Icons.logout,
-              label: 'Logout',
-              color: AppColors.error,
-              onTap: _showLogoutDialog,
-            ),
-            const SizedBox(height: 40),
-            Text(
-              'Delulu v$_appVersion',
-              style: GoogleFonts.inter(
-                fontSize: 12,
-                color: AppColors.onSurfaceVariant.withOpacity(0.5),
-                letterSpacing: 1,
+                  );
+                },
               ),
             ),
-            const SizedBox(height: 20),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildProfileHeader(String? url, String name, int age, String bio) {
-    return Column(
-      children: [
-        Stack(
-          clipBehavior: Clip.none,
-          children: [
-            Container(
-              width: 120,
-              height: 120,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(color: AppColors.primary, width: 2),
-                boxShadow: [
-                  BoxShadow(
-                    color: AppColors.primaryContainer.withValues(alpha: 0.3),
-                    blurRadius: 20,
-                  ),
-                ],
-              ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(60),
-                child: url != null
-                  ? (url.startsWith('data:image')
-                      ? Image.memory(base64Decode(url.split(',').last), fit: BoxFit.cover)
-                      : CachedNetworkImage(imageUrl: url, fit: BoxFit.cover))
-                  : Container(
-                      color: AppColors.surfaceContainerHigh,
-                      child: const Icon(Icons.person, color: AppColors.outlineVariant, size: 60),
-                    ),
-              ),
-            ),
-            if (_isVerified)
-              Positioned(
-                bottom: 0,
-                right: 0,
-                child: Container(
-                  padding: const EdgeInsets.all(4),
-                  decoration: const BoxDecoration(color: Colors.blueAccent, shape: BoxShape.circle),
-                  child: const Icon(Icons.verified, color: Colors.white, size: 20),
-                ),
-              ),
+  Widget _buildAuraTitle() {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Text(
+        'Your Aura',
+        style: GoogleFonts.beVietnamPro(
+          fontSize: 32,
+          fontWeight: FontWeight.w800,
+          color: Colors.white,
+          letterSpacing: -1,
+          shadows: [
+            Shadow(color: Colors.black.withValues(alpha: 0.5), blurRadius: 10, offset: const Offset(0, 2)),
           ],
         ),
-        const SizedBox(height: 16),
+      ),
+    );
+  }
+
+  Widget _buildStatsSection({required int connections, required int likes, required int auraScore}) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceAround,
+        children: [
+          _buildStatItem('Connections', connections.toString(), Icons.people_outline),
+          _buildStatDivider(),
+          _buildStatItem('Likes', likes.toString(), Icons.favorite_border),
+          _buildStatDivider(),
+          _buildStatItem('Aura Score', '$auraScore%', Icons.auto_awesome),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatItem(String label, String value, IconData icon) {
+    return Column(
+      children: [
+        Icon(icon, color: AppColors.primary, size: 28),
+        const SizedBox(height: 8),
         Text(
-          '$name, $age',
-          style: GoogleFonts.beVietnamPro(fontSize: 24, fontWeight: FontWeight.w700, color: AppColors.onSurface),
+          value,
+          style: GoogleFonts.beVietnamPro(
+            fontSize: 26,
+            fontWeight: FontWeight.w900,
+            color: Colors.white,
+          ),
         ),
         const SizedBox(height: 4),
         Text(
-          bio,
-          style: GoogleFonts.inter(fontSize: 13, color: AppColors.onSurfaceVariant),
-          textAlign: TextAlign.center,
+          label.toUpperCase(),
+          style: GoogleFonts.inter(
+            fontSize: 9,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 1,
+            color: AppColors.onSurfaceVariant.withValues(alpha: 0.6),
+          ),
         ),
       ],
+    );
+  }
+
+  Widget _buildStatDivider() {
+    return Container(
+      height: 40,
+      width: 1,
+      color: Colors.white.withValues(alpha: 0.1),
+    );
+  }
+
+  Widget _buildProfileHeader(String name, int age) {
+    return Column(
+      children: [
+        Text(
+          '$name, $age',
+          style: GoogleFonts.beVietnamPro(
+            fontSize: 32,
+            fontWeight: FontWeight.w800,
+            color: Colors.white,
+            shadows: [
+              Shadow(color: Colors.black.withValues(alpha: 0.3), blurRadius: 8),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildBioSection(String bio) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Container(
+              width: 12,
+              height: 2,
+              decoration: BoxDecoration(
+                color: AppColors.primary,
+                borderRadius: BorderRadius.circular(1),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              'BIO',
+              style: GoogleFonts.inter(
+                fontSize: 11,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 2,
+                color: AppColors.primary,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        AnimatedSize(
+          duration: const Duration(milliseconds: 300),
+          alignment: Alignment.topCenter,
+          curve: Curves.easeInOut,
+          child: GestureDetector(
+            onTap: () {
+              if (bio.length > 80) {
+                setState(() {
+                  _isBioExpanded = !_isBioExpanded;
+                });
+              }
+            },
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  bio,
+                  maxLines: _isBioExpanded ? null : 2,
+                  overflow: _isBioExpanded ? null : TextOverflow.ellipsis,
+                  style: GoogleFonts.inter(
+                    fontSize: 15,
+                    color: Colors.white.withValues(alpha: 0.9),
+                    height: 1.6,
+                  ),
+                  textAlign: TextAlign.left,
+                ),
+                if (!_isBioExpanded && bio.length > 80)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(
+                      'Read more',
+                      style: GoogleFonts.inter(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.primary.withValues(alpha: 0.8),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildEditProfileButton() {
+    return Container(
+      width: double.infinity,
+      height: 60,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            AppColors.tertiaryContainer,
+            AppColors.primaryContainer,
+          ],
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.primaryContainer.withValues(alpha: 0.3),
+            blurRadius: 28,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: ElevatedButton(
+        onPressed: () {
+          if (_profile != null) {
+            Navigator.push(
+              context,
+              PageRouteBuilder(
+                pageBuilder: (context, animation, secondaryAnimation) =>
+                    EditProfileScreen(profile: _profile!),
+                transitionsBuilder: (context, animation, secondaryAnimation, child) {
+                  const begin = Offset(0.0, 1.0);
+                  const end = Offset.zero;
+                  const curve = Curves.easeOutCubic;
+
+                  var trait = Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
+                  var offsetAnimation = animation.drive(trait);
+
+                  return SlideTransition(
+                    position: offsetAnimation,
+                    child: FadeTransition(
+                      opacity: animation,
+                      child: child,
+                    ),
+                  );
+                },
+                transitionDuration: const Duration(milliseconds: 500),
+              ),
+            ).then((_) {
+              loadProfile();
+            });
+          }
+        },
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.transparent,
+          shadowColor: Colors.transparent,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.edit_note, color: Colors.white, size: 24),
+            const SizedBox(width: 8),
+            Text(
+              'EDIT PROFILE',
+              style: GoogleFonts.beVietnamPro(
+                fontSize: 14,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 2,
+                color: Colors.white,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 

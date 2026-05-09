@@ -92,7 +92,7 @@ class _HomeScreenState extends State<HomeScreen> {
               if (index == 0) {
                 _discoveryKey.currentState?.refreshFeed();
               } else if (index == 1) {
-                _signalsKey.currentState?.fetchLiked();
+                _signalsKey.currentState?.fetchData();
               } else if (index == 2) {
                 _pingsKey.currentState?.fetchRequests();
               } else if (index == 3) {

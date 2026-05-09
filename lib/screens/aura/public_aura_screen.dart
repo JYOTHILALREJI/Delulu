@@ -1,10 +1,12 @@
 import 'dart:convert';
 import 'dart:ui';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../theme/app_colors.dart';
 import '../../services/api_service.dart';
+import '../../components/delulu_wavy_loader.dart';
 
 class PublicAuraScreen extends StatefulWidget {
   final String userId;
@@ -22,6 +24,8 @@ class _PublicAuraScreenState extends State<PublicAuraScreen> {
   bool _isLoading = true;
   Map<String, dynamic>? _profile;
   bool _isMePremium = false;
+  bool _isBioExpanded = false;
+  int? _initialLikesCount;
 
   @override
   void initState() {
@@ -35,6 +39,7 @@ class _PublicAuraScreenState extends State<PublicAuraScreen> {
       if (res.statusCode == 200) {
         final body = jsonDecode(res.body);
         _profile = body['profile'];
+        _initialLikesCount = _profile?['likes_count'] ?? 0;
       }
 
       // Fetch current user's premium status
@@ -47,6 +52,16 @@ class _PublicAuraScreenState extends State<PublicAuraScreen> {
       setState(() => _isLoading = false);
     } catch (e) {
       if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _syncLikesCount() async {
+    if (_profile == null || _initialLikesCount == null) return;
+    final currentLikes = _profile!['likes_count'] ?? 0;
+    if (currentLikes != _initialLikesCount) {
+      // Update initial count so we don't sync again unnecessarily
+      _initialLikesCount = currentLikes;
+      await ApiService.syncLikes(widget.userId, currentLikes);
     }
   }
 
@@ -79,6 +94,7 @@ class _PublicAuraScreenState extends State<PublicAuraScreen> {
           TextButton(
             onPressed: () async {
               Navigator.pop(context);
+              await _syncLikesCount(); // Sync before blocking if count changed
               final res = await ApiService.blockUser(widget.userId);
               if (res.statusCode == 200) {
                 _showCustomToast('User blocked');
@@ -111,6 +127,7 @@ class _PublicAuraScreenState extends State<PublicAuraScreen> {
           TextButton(
             onPressed: () async {
               Navigator.pop(context);
+              await _syncLikesCount(); // Sync before unblocking if count changed
               final res = await ApiService.unblockUser(widget.userId);
               if (res.statusCode == 200) {
                 _showCustomToast('User unblocked');
@@ -163,6 +180,7 @@ class _PublicAuraScreenState extends State<PublicAuraScreen> {
             onPressed: () async {
               if (reasonController.text.trim().isEmpty) return;
               Navigator.pop(context);
+              await _syncLikesCount(); // Sync before reporting if count changed
               final res = await ApiService.reportUser(widget.userId, reasonController.text.trim());
               if (res.statusCode == 200) {
                 _showCustomToast('Reported successfully');
@@ -175,43 +193,128 @@ class _PublicAuraScreenState extends State<PublicAuraScreen> {
     );
   }
 
+  void _showDisconnectConfirmation() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppColors.obsidianEdge,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        title: Text(
+          'Disconnect from ${_profile!['display_name']}?',
+          style: GoogleFonts.beVietnamPro(fontWeight: FontWeight.w700, color: Colors.white),
+        ),
+        content: Text(
+          'You will no longer be connected and your chat history will be removed. Are you sure?',
+          style: GoogleFonts.inter(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(
+              'KEEP CONNECTION',
+              style: GoogleFonts.inter(color: Colors.white54, fontWeight: FontWeight.bold),
+            ),
+          ),
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              await _syncLikesCount(); // Sync before disconnecting if count changed
+              final res = await ApiService.disconnectUser(widget.userId);
+              if (res.statusCode == 200) {
+                _showCustomToast('Disconnected successfully');
+                if (mounted) {
+                  setState(() {
+                    _profile!['request_status'] = null;
+                  });
+                }
+              }
+            },
+            child: Text(
+              'DISCONNECT',
+              style: GoogleFonts.inter(color: AppColors.error, fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
-      return const Scaffold(
-        backgroundColor: AppColors.obsidianEdge,
-        body: Center(child: CircularProgressIndicator(color: AppColors.primary)),
+      return Scaffold(
+        body: Container(
+          width: double.infinity,
+          height: double.infinity,
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [Color(0xFF2E1065), Colors.black],
+            ),
+          ),
+          child: const Center(child: DeluluWavyLoader()),
+        ),
       );
     }
 
     if (_profile == null) {
       return Scaffold(
-        backgroundColor: AppColors.obsidianEdge,
-        body: Center(
-          child: Text('User not found', style: GoogleFonts.inter(color: Colors.white)),
+        body: Container(
+          width: double.infinity,
+          height: double.infinity,
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [Color(0xFF2E1065), Colors.black],
+            ),
+          ),
+          child: Center(
+            child: Text('User not found', style: GoogleFonts.inter(color: Colors.white)),
+          ),
         ),
       );
     }
 
-    final String name = _profile!['display_name'] ?? 'User';
+    final String displayName = _profile!['display_name'] ?? 'User';
     final int age = _profile!['age'] ?? 0;
     final String bio = _profile!['bio'] ?? 'Delulu Dreamer';
-    final int connects = _profile!['connect_count'] ?? 0;
-    final int matching = _profile!['aura_score'] ?? 0;
     final List<dynamic> photos = _profile!['photos'] ?? [];
-    
-    final primaryPhoto = photos.firstWhere((p) => p['is_primary'] == true, orElse: () => photos.isNotEmpty ? photos[0] : null);
-    final avatarUrl = primaryPhoto?['url'];
 
-    return Scaffold(
-      backgroundColor: AppColors.obsidianEdge,
-      extendBodyBehindAppBar: true,
-      appBar: AppBar(
+    return PopScope(
+      canPop: true,
+      onPopInvoked: (didPop) {
+        if (didPop) {
+          _syncLikesCount();
+        }
+      },
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+      body: Container(
+        width: double.infinity,
+        height: double.infinity,
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [Color(0xFF2E1065), Colors.black],
+          ),
+        ),
+        child: Scaffold(
+          backgroundColor: Colors.transparent,
+          appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: Colors.white),
-          onPressed: () => Navigator.pop(context),
+          onPressed: () {
+            _syncLikesCount();
+            Navigator.pop(context, {
+              'is_liked': _profile?['is_liked'],
+              'request_status': _profile?['request_status'],
+            });
+          },
         ),
         actions: [
           PopupMenuButton<String>(
@@ -273,277 +376,369 @@ class _PublicAuraScreenState extends State<PublicAuraScreen> {
         ],
       ),
       body: SingleChildScrollView(
+        physics: const BouncingScrollPhysics(),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
         child: Column(
           children: [
-            _buildAuraHeader(avatarUrl, name, age, bio, connects, matching, photos),
+            _buildPublicProfileTitle(displayName),
+            const SizedBox(height: 32),
+            
+            // Glass Card for Profile Details
+            ClipRRect(
+              borderRadius: BorderRadius.circular(32),
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(32),
+                    border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+                  ),
+                  child: Column(
+                    children: [
+                      _buildProfileHeader(displayName, age),
+                      const SizedBox(height: 20),
+                      
+                      _buildStatsSection(
+                        connections: _profile?['connect_count'] ?? 0,
+                        likes: _profile?['likes_count'] ?? 0,
+                        auraScore: _profile?['aura_score'] ?? 0,
+                      ),
+                      
+                      const SizedBox(height: 20),
+                      _buildBioSection(bio),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 24),
             
             // Interaction Buttons
-            Padding(
-              padding: const EdgeInsets.all(24),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: _buildActionButton(
-                      label: _profile!['is_liked'] == true ? 'Liked' : 'Like',
-                      icon: _profile!['is_liked'] == true ? Icons.favorite : Icons.favorite_border,
-                      color: _profile!['is_liked'] == true ? AppColors.tertiary : Colors.white.withOpacity(0.1),
-                      onTap: () async {
-                        if (_profile!['is_liked'] == true) return;
+            Row(
+              children: [
+                Expanded(
+                  child: _buildActionButton(
+                    label: _profile!['is_liked'] == true ? 'Liked' : 'Like',
+                    icon: _profile!['is_liked'] == true ? Icons.favorite : Icons.favorite_border,
+                    color: _profile!['is_liked'] == true ? AppColors.tertiary : AppColors.primary,
+                    isPrimary: _profile!['is_liked'] != true,
+                    onTap: () async {
+                      if (_profile!['is_liked'] == true) {
+                        final res = await ApiService.deleteLike(widget.userId);
+                        if (res.statusCode == 200) {
+                          setState(() {
+                            _profile!['is_liked'] = false;
+                            _profile!['likes_count'] = math.max(0, (_profile!['likes_count'] ?? 1) - 1);
+                          });
+                        }
+                      } else {
                         final res = await ApiService.likeUser(widget.userId);
                         if (res.statusCode == 200) {
-                          setState(() => _profile!['is_liked'] = true);
+                          setState(() {
+                            _profile!['is_liked'] = true;
+                            _profile!['likes_count'] = (_profile!['likes_count'] ?? 0) + 1;
+                          });
                         }
-                      },
-                    ),
+                      }
+                    },
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: _buildActionButton(
-                      label: _profile!['request_status'] == 'accepted' 
-                        ? 'Connected' 
-                        : _profile!['request_status'] == 'pending' 
-                          ? 'Pending' 
-                          : 'Connect',
-                      icon: _profile!['request_status'] == 'accepted' 
-                        ? Icons.link 
-                        : _profile!['request_status'] == 'pending' 
-                          ? Icons.hourglass_empty 
-                          : Icons.bolt,
-                      isPrimary: _profile!['request_status'] == null,
-                      onTap: () async {
-                        if (_profile!['request_status'] != null) return;
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _buildActionButton(
+                    label: _profile!['request_status'] == 'accepted' 
+                      ? 'Connected' 
+                      : _profile!['request_status'] == 'pending' 
+                        ? 'Pending' 
+                        : 'Connect',
+                    icon: _profile!['request_status'] == 'accepted' 
+                      ? Icons.link 
+                      : _profile!['request_status'] == 'pending' 
+                        ? Icons.hourglass_empty 
+                        : Icons.bolt,
+                    isPrimary: _profile!['request_status'] == null,
+                    onTap: () async {
+                      if (_profile!['request_status'] == 'accepted') {
+                        _showDisconnectConfirmation();
+                      } else if (_profile!['request_status'] == null) {
                         final res = await ApiService.sendConnectionRequest(widget.userId);
                         if (res.statusCode == 200) {
                           setState(() => _profile!['request_status'] = 'pending');
                         }
-                      },
-                    ),
+                      }
+                    },
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
-            const SizedBox(height: 100),
+            
+            const SizedBox(height: 40),
+            
+            // Gallery Section
+            if (photos.isNotEmpty) _buildGallerySection(photos),
+            
+            const SizedBox(height: 40),
           ],
+        ),
+      ),
+    ),
+  ),
+),
+);
+}
+
+  Widget _buildPublicProfileTitle(String name) {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Text(
+        "$name's Aura",
+        style: GoogleFonts.beVietnamPro(
+          fontSize: 32,
+          fontWeight: FontWeight.w800,
+          color: Colors.white,
+          letterSpacing: -1,
         ),
       ),
     );
   }
 
-  Widget _buildAuraHeader(String? avatarUrl, String name, int age, String bio, int connects, int matching, List<dynamic> allPhotos) {
-    return Container(
-      width: double.infinity,
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [
-            AppColors.primaryContainer.withOpacity(0.2),
-            AppColors.obsidianEdge,
+  Widget _buildProfileHeader(String name, int age) {
+    final bool isBlocked = _profile?['is_blocked'] == true;
+    return Column(
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Flexible(
+              child: Text(
+                '$name, $age',
+                style: GoogleFonts.beVietnamPro(
+                  fontSize: 32,
+                  fontWeight: FontWeight.w800,
+                  color: Colors.white,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            if (isBlocked) ...[
+              const SizedBox(width: 12),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.redAccent.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.redAccent.withOpacity(0.5)),
+                ),
+                child: Text(
+                  'BLOCKED',
+                  style: GoogleFonts.inter(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w900,
+                    color: Colors.redAccent,
+                  ),
+                ),
+              ),
+            ],
           ],
         ),
-      ),
-      child: Column(
-        children: [
-          const SizedBox(height: 100),
-          Text(
-            "$name's AURA",
-            style: GoogleFonts.outfit(
-              fontSize: 20,
-              fontWeight: FontWeight.w900,
-              letterSpacing: 4,
-              color: AppColors.primary,
-            ),
-          ),
-          const SizedBox(height: 40),
-          
-          // Profile Icon & Stats
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 30),
-            child: Row(
-              children: [
-                Container(
-                  width: 110,
-                  height: 110,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(color: AppColors.primary, width: 2.5),
-                    boxShadow: [
-                      BoxShadow(color: AppColors.primary.withOpacity(0.3), blurRadius: 25),
-                    ],
-                  ),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(55),
-                    child: avatarUrl != null
-                        ? (avatarUrl.startsWith('data:image')
-                            ? Image.memory(base64Decode(avatarUrl.split(',').last), fit: BoxFit.cover)
-                            : CachedNetworkImage(imageUrl: avatarUrl, fit: BoxFit.cover))
-                        : Container(
-                            color: AppColors.surfaceContainerHigh,
-                            child: const Icon(Icons.person, color: AppColors.outlineVariant, size: 55),
-                          ),
-                  ),
-                ),
-                const SizedBox(width: 24),
-                Expanded(
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceAround,
-                    children: [
-                      _buildStatColumn(connects.toString(), 'CONNECTS'),
-                      _buildStatColumn('$matching%', 'MATCHING'),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-          
-          const SizedBox(height: 32),
-          
-          // Name & Age
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 30),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Flexible(
-                        child: Text(
-                          '$name, $age',
-                          style: GoogleFonts.beVietnamPro(
-                            fontSize: 30,
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.onSurface,
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      if (_profile!['is_blocked'] == true) ...[
-                        const SizedBox(width: 12),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: Colors.redAccent.withOpacity(0.2),
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.redAccent.withOpacity(0.5)),
-                          ),
-                          child: Text(
-                            'BLOCKED',
-                            style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.w900, color: Colors.redAccent),
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    bio,
-                    style: GoogleFonts.inter(
-                      fontSize: 15,
-                      color: AppColors.onSurfaceVariant.withOpacity(0.9),
-                      height: 1.6,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          
-          const SizedBox(height: 32),
-          
-          // Photo Row (Image Section)
-          if (allPhotos.isNotEmpty) ...[
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 10),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  'GALLERY',
-                  style: GoogleFonts.inter(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 2,
-                    color: AppColors.primary.withOpacity(0.7),
-                  ),
-                ),
-              ),
-            ),
-            SizedBox(
-              height: 180,
-              child: ListView.builder(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                scrollDirection: Axis.horizontal,
-                physics: const BouncingScrollPhysics(),
-                itemCount: allPhotos.length,
-                itemBuilder: (context, index) {
-                  final photo = allPhotos[index];
-                  final photoUrl = photo['url'];
-                  final isPrivate = photo['is_private'] == true;
-                  final shouldBlur = isPrivate && !_isMePremium && _profile?['request_status'] != 'accepted';
+      ],
+    );
+  }
 
-                  return Container(
-                    width: 140,
-                    margin: const EdgeInsets.only(right: 12),
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(24),
-                      border: Border.all(color: Colors.white.withOpacity(0.1)),
-                    ),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(24),
-                      child: Stack(
-                        fit: StackFit.expand,
-                        children: [
-                          photoUrl.startsWith('data:image')
-                              ? Image.memory(base64Decode(photoUrl.split(',').last), fit: BoxFit.cover)
-                              : CachedNetworkImage(imageUrl: photoUrl, fit: BoxFit.cover),
-                          if (shouldBlur)
-                            Positioned.fill(
-                              child: ClipRect(
-                                child: BackdropFilter(
-                                  filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-                                  child: Container(
-                                    color: Colors.black.withOpacity(0.4),
-                                    child: const Center(
-                                      child: Icon(Icons.lock_outline, color: Colors.white70, size: 30),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                  );
-                },
-              ),
-            ),
-          ],
+  Widget _buildStatsSection({required int connections, required int likes, required int auraScore}) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceAround,
+        children: [
+          _buildStatItem('Connects', connections.toString(), Icons.people_outline),
+          _buildStatDivider(),
+          _buildStatItem('Likes', likes.toString(), Icons.favorite_border),
+          _buildStatDivider(),
+          _buildStatItem('Matching', '$auraScore%', Icons.auto_awesome),
         ],
       ),
     );
   }
 
-  Widget _buildStatColumn(String value, String label) {
+  Widget _buildStatItem(String label, String value, IconData icon) {
     return Column(
       children: [
+        Icon(icon, color: AppColors.primary, size: 28),
+        const SizedBox(height: 8),
         Text(
           value,
-          style: GoogleFonts.outfit(
-            fontSize: 24,
-            fontWeight: FontWeight.w800,
-            color: AppColors.onSurface,
+          style: GoogleFonts.beVietnamPro(
+            fontSize: 26,
+            fontWeight: FontWeight.w900,
+            color: Colors.white,
           ),
         ),
         const SizedBox(height: 4),
         Text(
-          label,
+          label.toUpperCase(),
           style: GoogleFonts.inter(
-            fontSize: 10,
+            fontSize: 9,
             fontWeight: FontWeight.w700,
-            letterSpacing: 1.2,
-            color: AppColors.primary,
+            letterSpacing: 1,
+            color: AppColors.onSurfaceVariant.withValues(alpha: 0.6),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildStatDivider() {
+    return Container(
+      height: 40,
+      width: 1,
+      color: Colors.white.withValues(alpha: 0.1),
+    );
+  }
+
+  Widget _buildBioSection(String bio) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Container(
+              width: 12,
+              height: 2,
+              decoration: BoxDecoration(
+                color: AppColors.primary,
+                borderRadius: BorderRadius.circular(1),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              'BIO',
+              style: GoogleFonts.inter(
+                fontSize: 11,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 2,
+                color: AppColors.primary,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        AnimatedSize(
+          duration: const Duration(milliseconds: 300),
+          alignment: Alignment.topCenter,
+          curve: Curves.easeInOut,
+          child: GestureDetector(
+            onTap: () {
+              if (bio.length > 80) {
+                setState(() {
+                  _isBioExpanded = !_isBioExpanded;
+                });
+              }
+            },
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  bio,
+                  maxLines: _isBioExpanded ? null : 2,
+                  overflow: _isBioExpanded ? null : TextOverflow.ellipsis,
+                  style: GoogleFonts.inter(
+                    fontSize: 15,
+                    color: Colors.white.withValues(alpha: 0.9),
+                    height: 1.6,
+                  ),
+                  textAlign: TextAlign.left,
+                ),
+                if (!_isBioExpanded && bio.length > 80)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(
+                      'Read more',
+                      style: GoogleFonts.inter(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.primary.withValues(alpha: 0.8),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildGallerySection(List<dynamic> allPhotos) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
+          child: Text(
+            'GALLERY',
+            style: GoogleFonts.inter(
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 2,
+              color: AppColors.primary.withOpacity(0.7),
+            ),
+          ),
+        ),
+        SizedBox(
+          height: 180,
+          child: ListView.builder(
+            scrollDirection: Axis.horizontal,
+            physics: const BouncingScrollPhysics(),
+            itemCount: allPhotos.length,
+            itemBuilder: (context, index) {
+              final photo = allPhotos[index];
+              final photoUrl = photo['url'];
+              final isPrivate = photo['is_private'] == true;
+              final shouldBlur = isPrivate && !_isMePremium && _profile?['request_status'] != 'accepted';
+
+              return Container(
+                width: 140,
+                margin: const EdgeInsets.only(right: 12),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(24),
+                  border: Border.all(color: Colors.white.withOpacity(0.1)),
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(24),
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      photoUrl.startsWith('data:image')
+                          ? Image.memory(base64Decode(photoUrl.split(',').last), fit: BoxFit.cover)
+                          : CachedNetworkImage(imageUrl: photoUrl, fit: BoxFit.cover),
+                      if (shouldBlur)
+                        Positioned.fill(
+                          child: ClipRect(
+                            child: BackdropFilter(
+                              filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+                              child: Container(
+                                color: Colors.black.withOpacity(0.4),
+                                child: const Center(
+                                  child: Icon(Icons.lock_outline, color: Colors.white70, size: 30),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              );
+            },
           ),
         ),
       ],

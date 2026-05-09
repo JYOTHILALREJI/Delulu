@@ -270,11 +270,13 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     try {
       // Convert photos to base64 objects for API submission
       List<Map<String, dynamic>> photosPayload = [];
-      for (final photo in _photoItems) {
+      for (int i = 0; i < _photoItems.length; i++) {
+        final photo = _photoItems[i];
         final bytes = await File(photo.path).readAsBytes();
         photosPayload.add({
           'url': 'data:image/jpeg;base64,' + base64Encode(bytes),
           'is_private': photo.isPrivate,
+          'is_primary': i == 0,
         });
       }
 
@@ -289,6 +291,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       });
 
       if (res.statusCode == 200) {
+        await ApiService.saveUserData(true, _nameController.text.trim());
         if (!mounted) return;
         Navigator.of(context).pushReplacementNamed('/home');
       } else {
@@ -304,9 +307,16 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       }
     } catch (e) {
       if (!mounted) return;
+      
+      final errorStr = e.toString().toLowerCase();
+      final isNetworkError = errorStr.contains('socketexception') || 
+                             errorStr.contains('timeoutexception') || 
+                               errorStr.contains('connection failed') ||
+                               errorStr.contains('host lookup');
+
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Cannot connect to server'),
+        SnackBar(
+          content: Text(isNetworkError ? 'Cannot connect to server' : 'An unexpected error occurred'),
           backgroundColor: AppColors.errorContainer,
           behavior: SnackBarBehavior.floating,
         ),
@@ -643,7 +653,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               color: AppColors.surfaceContainerHigh.withValues(alpha: 0.25),
               borderRadius: BorderRadius.circular(12),
               border: Border.all(
-                color: AppColors.outlineVariant.withValues(alpha: 0.3),
+                color: AppColors.onSurfaceVariant.withValues(alpha: 0.7),
               ),
             ),
             child: TextField(
@@ -660,7 +670,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 hintText: 'Tell others a bit about yourself...',
                 hintStyle: GoogleFonts.beVietnamPro(
                   fontSize: 14,
-                  color: AppColors.outlineVariant.withValues(alpha: 0.6),
+                  color: AppColors.onSurfaceVariant.withValues(alpha: 0.7),
                 ),
                 border: InputBorder.none,
                 enabledBorder: InputBorder.none,
@@ -668,7 +678,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 contentPadding: const EdgeInsets.all(16),
                 counterStyle: GoogleFonts.inter(
                   fontSize: 11,
-                  color: AppColors.outline.withValues(alpha: 0.5),
+                  color: AppColors.onSurfaceVariant.withValues(alpha: 0.6),
                 ),
               ),
             ),
@@ -709,7 +719,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               color: AppColors.surfaceContainerHigh.withValues(alpha: 0.25),
               borderRadius: BorderRadius.circular(12),
               border: Border.all(
-                color: AppColors.outlineVariant.withValues(alpha: 0.3),
+                color: AppColors.outline.withValues(alpha: 0.5),
               ),
             ),
             child: TextField(
@@ -725,12 +735,12 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 hintText: 'Type and press Enter (e.g., Travel, Coffee)',
                 hintStyle: GoogleFonts.beVietnamPro(
                   fontSize: 14,
-                  color: AppColors.outlineVariant.withValues(alpha: 0.6),
+                  color: AppColors.onSurfaceVariant.withValues(alpha: 0.7),
                 ),
                 prefixIcon: Padding(
                   padding: const EdgeInsets.all(14),
                   child: Icon(Icons.add_circle_outline,
-                      size: 20, color: AppColors.outline.withValues(alpha: 0.5)),
+                      size: 20, color: AppColors.outline.withValues(alpha: 0.8)),
                 ),
                 border: InputBorder.none,
                 enabledBorder: InputBorder.none,
@@ -801,7 +811,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               fontSize: 11,
               fontWeight: FontWeight.w600,
               letterSpacing: 1.2,
-              color: AppColors.outline.withValues(alpha: 0.5),
+              color: AppColors.outline.withValues(alpha: 0.7),
             ),
           ),
           const SizedBox(height: 12),
@@ -824,8 +834,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(
                       color: isAdded
-                          ? AppColors.primary.withValues(alpha: 0.4)
-                          : AppColors.outlineVariant.withValues(alpha: 0.3),
+                          ? AppColors.primary.withValues(alpha: 0.7)
+                          : AppColors.outline.withValues(alpha: 0.6),
                     ),
                     color: isAdded
                         ? AppColors.primary.withValues(alpha: 0.15)
@@ -838,7 +848,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                       fontWeight: FontWeight.w500,
                       color: isAdded
                           ? AppColors.primary
-                          : AppColors.onSurfaceVariant.withValues(alpha: 0.6),
+                          : AppColors.onSurfaceVariant.withValues(alpha: 0.7),
                     ),
                   ),
                 ),
@@ -1122,7 +1132,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           fontSize: 10,
           fontWeight: FontWeight.w600,
           letterSpacing: 1.6,
-          color: AppColors.outline,
+          color: AppColors.onSurfaceVariant.withValues(alpha: 0.9),
         ),
       ),
     );
@@ -1148,13 +1158,13 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         hintText: hint,
         hintStyle: GoogleFonts.beVietnamPro(
           fontSize: 15,
-          color: AppColors.surfaceContainerHighest.withValues(alpha: 0.7),
+          color: AppColors.onSurfaceVariant.withValues(alpha: 0.8),
         ),
         border: UnderlineInputBorder(
-          borderSide: BorderSide(color: AppColors.outlineVariant.withValues(alpha: 0.5)),
+          borderSide: BorderSide(color: AppColors.outline.withValues(alpha: 0.7)),
         ),
         enabledBorder: UnderlineInputBorder(
-          borderSide: BorderSide(color: AppColors.outlineVariant.withValues(alpha: 0.5)),
+          borderSide: BorderSide(color: AppColors.outline.withValues(alpha: 0.7)),
         ),
         focusedBorder: const UnderlineInputBorder(
           borderSide: BorderSide(color: AppColors.primary, width: 1.5),
@@ -1183,7 +1193,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           border: Border.all(
             color: isSelected
                 ? AppColors.primaryContainer
-                : AppColors.outlineVariant.withValues(alpha: 0.4),
+                : AppColors.outline.withValues(alpha: 0.6),
             width: isSelected ? 1.5 : 1,
           ),
           color: isSelected
@@ -1265,8 +1275,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: AppColors.outlineVariant.withValues(alpha: 0.3),
+          color: AppColors.outline.withValues(alpha: 0.6),
           style: BorderStyle.solid,
+          width: 1.5,
         ),
       ),
       child: Material(
@@ -1282,7 +1293,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   children: [
                     Icon(
                       Icons.add,
-                      color: AppColors.outlineVariant.withValues(alpha: 0.5),
+                      color: AppColors.outline.withValues(alpha: 0.8),
                       size: isPrimary ? 32 : 24,
                     ),
                     if (isPrimary) ...[
@@ -1322,7 +1333,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: AppColors.primaryContainer.withValues(alpha: 0.3),
+          color: AppColors.primaryContainer.withValues(alpha: 0.8),
+          width: 1.5,
         ),
       ),
       child: ClipRRect(

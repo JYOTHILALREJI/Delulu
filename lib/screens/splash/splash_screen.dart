@@ -68,10 +68,51 @@ class _SplashScreenState extends State<SplashScreen>
       try {
         final res = await ApiService.getMe();
         final body = jsonDecode(res.body);
-        final isOnboarded = body['user']?['is_onboarded'] ?? false;
-        final displayName = body['user']?['display_name'] ?? '';
 
+        if (res.statusCode == 200 || res.statusCode == 201) {
+          final isOnboarded = body['user']?['is_onboarded'] ?? false;
+          final displayName = body['user']?['display_name'] ?? '';
+          
+          await ApiService.saveUserData(isOnboarded, displayName);
+
+          if (!mounted) return;
+          if (isOnboarded) {
+            Navigator.of(context).pushReplacementNamed('/home');
+          } else {
+            Navigator.of(context).pushReplacementNamed(
+              '/onboarding',
+              arguments: displayName,
+            );
+          }
+        } else {
+          await ApiService.clearToken();
+          if (!mounted) return;
+          Navigator.of(context).pushReplacementNamed('/login');
+        }
+      } catch (e) {
         if (!mounted) return;
+        
+        final errorStr = e.toString().toLowerCase();
+        final isNetworkError = errorStr.contains('socketexception') || 
+                               errorStr.contains('timeoutexception') || 
+                               errorStr.contains('connection failed') ||
+                               errorStr.contains('host lookup');
+
+        if (isNetworkError) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text('Network not available. Using cached data.', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+              backgroundColor: AppColors.toastBackground,
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+          );
+        }
+        
+        final userData = await ApiService.getUserData();
+        final isOnboarded = userData['is_onboarded'] as bool;
+        final displayName = userData['display_name'] as String;
+        
         if (isOnboarded) {
           Navigator.of(context).pushReplacementNamed('/home');
         } else {
@@ -80,9 +121,6 @@ class _SplashScreenState extends State<SplashScreen>
             arguments: displayName,
           );
         }
-      } catch (_) {
-        if (!mounted) return;
-        Navigator.of(context).pushReplacementNamed('/login');
       }
     } else {
       Navigator.of(context).pushReplacementNamed('/login');

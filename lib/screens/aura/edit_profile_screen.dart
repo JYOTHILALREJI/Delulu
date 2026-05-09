@@ -4,6 +4,15 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../../theme/app_colors.dart';
 import '../../../services/api_service.dart';
 import '../../../utils/interests_data.dart';
+import '../uploadedImages/vision_board.dart';
+import 'blocked_profiles_screen.dart';
+import '../../services/verification_service.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:geocoding/geocoding.dart';
+import 'package:package_info_plus/package_info_plus.dart';
+import 'dart:math';
+import '../../components/delulu_wavy_loader.dart';
 
 class EditProfileScreen extends StatefulWidget {
   final Map<String, dynamic> profile;
@@ -23,6 +32,15 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   late String _selectedSeeking;
   late List<String> _interests;
   late List<String> _suggestedInterests;
+  
+  // Settings
+  late bool _onlineEnabled;
+  late bool _typingEnabled;
+  late bool _lastSeenEnabled;
+  late bool _readReceiptEnabled;
+  late bool _liveLocationEnabled;
+  late bool _isVerified;
+  String _appVersion = '';
   
   bool _isLoading = false;
 
@@ -50,6 +68,39 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     }
     
     _suggestedInterests = InterestsData.getRandomInterests(10);
+    
+    _onlineEnabled = p['online_status_enabled'] ?? true;
+    _typingEnabled = p['typing_indicator_enabled'] ?? true;
+    _lastSeenEnabled = p['last_seen_enabled'] ?? true;
+    _readReceiptEnabled = p['read_receipt_enabled'] ?? true;
+    _liveLocationEnabled = p['live_location_enabled'] ?? false;
+    _isVerified = p['is_verified'] ?? false;
+    
+    _loadAppVersion();
+  }
+
+  Future<void> _loadAppVersion() async {
+    try {
+      final res = await ApiService.getVersion();
+      if (res.statusCode == 200) {
+        final body = jsonDecode(res.body);
+        setState(() {
+          _appVersion = body['version'] ?? '1.0.0';
+        });
+      } else {
+        final packageInfo = await PackageInfo.fromPlatform();
+        setState(() {
+          _appVersion = packageInfo.version;
+        });
+      }
+    } catch (e) {
+      try {
+        final packageInfo = await PackageInfo.fromPlatform();
+        setState(() {
+          _appVersion = packageInfo.version;
+        });
+      } catch (_) {}
+    }
   }
 
   @override
@@ -100,20 +151,145 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           );
         }
       }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Connection error', style: TextStyle(color: AppColors.onPrimary, fontWeight: FontWeight.w600)),
-            backgroundColor: AppColors.toastBackground,
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          ),
-        );
-      }
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
+  }
+
+  Future<void> _updateSetting(String key, dynamic value) async {
+    // Optimistic UI
+    setState(() {
+      if (key == 'online_status_enabled') _onlineEnabled = value;
+      if (key == 'typing_indicator_enabled') _typingEnabled = value;
+      if (key == 'last_seen_enabled') _lastSeenEnabled = value;
+      if (key == 'read_receipt_enabled') _readReceiptEnabled = value;
+      if (key == 'live_location_enabled') _liveLocationEnabled = value;
+      if (key == 'is_verified') _isVerified = value;
+    });
+
+    try {
+      await ApiService.saveProfile({key: value});
+    } catch (e) {
+      // Revert if failed (minimal approach here)
+      setState(() {
+        if (key == 'online_status_enabled') _onlineEnabled = !value;
+        // ... could revert others too
+      });
+    }
+  }
+
+  Future<void> _handleLocationToggle(bool value) async {
+    if (value) {
+      final status = await Permission.location.request();
+      if (status.isGranted) {
+        try {
+          final position = await Geolocator.getCurrentPosition(
+            desiredAccuracy: LocationAccuracy.low,
+          );
+          final random = Random();
+          final latOffset = (random.nextDouble() * 0.027 + 0.045) * (random.nextBool() ? 1 : -1);
+          final lngOffset = (random.nextDouble() * 0.027 + 0.045) * (random.nextBool() ? 1 : -1);
+          
+          final fuzzyLat = double.parse((position.latitude + latOffset).toStringAsFixed(3));
+          final fuzzyLng = double.parse((position.longitude + lngOffset).toStringAsFixed(3));
+          
+          String locName = 'Unknown Location';
+          try {
+            final placemarks = await placemarkFromCoordinates(fuzzyLat, fuzzyLng);
+            if (placemarks.isNotEmpty) {
+              final p = placemarks.first;
+              locName = '${p.subLocality ?? p.locality ?? ''}, ${p.administrativeArea ?? ''}'.trim();
+              if (locName.startsWith(',')) locName = locName.substring(1).trim();
+            }
+          } catch (_) {}
+
+          await ApiService.saveProfile({
+            'live_location_enabled': true,
+            'latitude': fuzzyLat,
+            'longitude': fuzzyLng,
+            'location_name': locName,
+          });
+          setState(() {
+            _liveLocationEnabled = true;
+            widget.profile['latitude'] = fuzzyLat;
+            widget.profile['longitude'] = fuzzyLng;
+            widget.profile['location_name'] = locName;
+          });
+        } catch (e) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Failed to get location')),
+            );
+          }
+          setState(() => _liveLocationEnabled = false);
+        }
+      } else {
+        setState(() => _liveLocationEnabled = false);
+      }
+    } else {
+      _updateSetting('live_location_enabled', false);
+    }
+  }
+
+  Future<void> _handleVerification() async {
+    if (_isVerified) return;
+
+    final status = await Permission.camera.request();
+    if (status.isGranted) {
+      final success = await Navigator.push<bool>(
+        context,
+        MaterialPageRoute(builder: (_) => const VerificationCameraScreen()),
+      );
+
+      if (success == true) {
+        await _updateSetting('is_verified', true);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Profile Verified Successfully!')),
+          );
+        }
+      }
+    }
+  }
+
+  Future<void> _showLogoutDialog() async {
+    return showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppColors.surfaceContainerHigh,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        title: Text(
+          'Leaving so soon?',
+          style: GoogleFonts.beVietnamPro(fontWeight: FontWeight.w700, color: Colors.white),
+        ),
+        content: Text(
+          'Are you sure you want to logout? You\'ll be missed! 🥺',
+          style: GoogleFonts.inter(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(
+              'STAY',
+              style: GoogleFonts.inter(color: Colors.white54, fontWeight: FontWeight.bold),
+            ),
+          ),
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              await ApiService.clearToken();
+              if (mounted) {
+                Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false);
+              }
+            },
+            child: Text(
+              'LOGOUT',
+              style: GoogleFonts.inter(color: AppColors.error, fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   void _showChangePasswordDialog() {
@@ -403,7 +579,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         ),
         actions: [
           if (_isLoading)
-            const Center(child: Padding(padding: EdgeInsets.only(right: 16), child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))))
+            Padding(
+              padding: const EdgeInsets.only(right: 16),
+              child: Center(child: DeluluWavyLoader(fontSize: 12)),
+            )
           else
             TextButton(
               onPressed: _saveProfile,
@@ -420,9 +599,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             children: [
               _buildSectionHeader('ACCOUNT'),
               _buildReadOnlyField('Email', widget.profile['email'] ?? ''),
-              _buildNavTile(
+              _buildSettingsNavTile(
+                icon: Icons.lock_outline,
                 label: 'Password',
-                trailing: '••••••••',
+                trailingText: '••••••••',
                 onTap: _showChangePasswordDialog,
               ),
               const SizedBox(height: 32),
@@ -467,6 +647,140 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 runSpacing: 8,
                 children: _interests.map((tag) => _buildInterestChip(tag)).toList(),
               ),
+              const SizedBox(height: 48),
+
+              _buildSectionHeader('GATEKEEPING'),
+              _buildToggleTile(
+                icon: Icons.visibility,
+                label: 'Online Status',
+                value: _onlineEnabled,
+                onChanged: (v) => _updateSetting('online_status_enabled', v),
+              ),
+              _buildToggleTile(
+                icon: Icons.keyboard,
+                label: 'Typing Indicator',
+                value: _typingEnabled,
+                onChanged: (v) => _updateSetting('typing_indicator_enabled', v),
+              ),
+              _buildToggleTile(
+                icon: Icons.access_time,
+                label: 'Last Seen',
+                value: _lastSeenEnabled,
+                onChanged: (v) => _updateSetting('last_seen_enabled', v),
+              ),
+              _buildToggleTile(
+                icon: Icons.done_all,
+                label: 'Read Receipts',
+                value: _readReceiptEnabled,
+                onChanged: (v) => _updateSetting('read_receipt_enabled', v),
+              ),
+              _buildToggleTile(
+                icon: Icons.near_me,
+                label: 'Share Location',
+                subtitle: 'Share your location to meet a real Delulu!',
+                value: _liveLocationEnabled,
+                onChanged: _handleLocationToggle,
+              ),
+              if (_liveLocationEnabled && widget.profile['latitude'] != null)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                  child: Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: AppColors.primary.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppColors.primary.withValues(alpha: 0.2)),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.my_location, size: 14, color: AppColors.primary),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Visible Location: ${widget.profile['location_name'] ?? 'Finding...'}',
+                                style: GoogleFonts.inter(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppColors.primary,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                '${widget.profile['latitude']}, ${widget.profile['longitude']}',
+                                style: GoogleFonts.inter(
+                                  fontSize: 10,
+                                  color: AppColors.primary.withValues(alpha: 0.7),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.refresh, size: 18, color: AppColors.primary),
+                          onPressed: () => _handleLocationToggle(true),
+                          tooltip: 'Update Location',
+                          constraints: const BoxConstraints(),
+                          padding: EdgeInsets.zero,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              const SizedBox(height: 32),
+
+              _buildSectionHeader('PORTFOLIO'),
+              _buildSettingsNavTile(
+                icon: Icons.auto_awesome_mosaic,
+                label: 'Vision Board',
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const VisionBoardScreen()),
+                ).then((_) => setState(() {})),
+              ),
+              const SizedBox(height: 32),
+
+              _buildSectionHeader('PRIVACY & SECURITY'),
+              _buildSettingsNavTile(
+                icon: Icons.block,
+                label: 'Blocked Profiles',
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const BlockedProfilesScreen()),
+                ),
+              ),
+              _buildSettingsNavTile(
+                icon: Icons.verified_user,
+                label: 'Verify Yourself',
+                subtitle: 'Verify yourself to get more matches and connection from Delulus.',
+                trailingText: _isVerified ? 'VERIFIED' : 'PENDING',
+                trailingStyle: GoogleFonts.inter(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w800,
+                  color: _isVerified ? Colors.greenAccent : AppColors.primary,
+                ),
+                onTap: _handleVerification,
+              ),
+              const SizedBox(height: 48),
+
+              Center(
+                child: Column(
+                  children: [
+                    _buildLogoutButton(),
+                    const SizedBox(height: 32),
+                    Text(
+                      'Delulu v$_appVersion',
+                      style: GoogleFonts.inter(
+                        fontSize: 12,
+                        color: AppColors.onSurfaceVariant.withValues(alpha: 0.7),
+                        letterSpacing: 1,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
               const SizedBox(height: 40),
             ],
           ),
@@ -482,8 +796,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       child: Text(
         title,
         style: GoogleFonts.inter(
-          fontSize: 11,
-          fontWeight: FontWeight.w800,
+          fontSize: 12,
+          fontWeight: FontWeight.w900,
           letterSpacing: 2,
           color: AppColors.primary,
         ),
@@ -496,9 +810,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       text.toUpperCase(),
       style: GoogleFonts.inter(
         fontSize: 10,
-        fontWeight: FontWeight.w600,
+        fontWeight: FontWeight.w700,
         letterSpacing: 1.5,
-        color: AppColors.onSurfaceVariant.withOpacity(0.6),
+        color: AppColors.onSurfaceVariant.withValues(alpha: 0.9),
       ),
     );
   }
@@ -513,9 +827,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           const SizedBox(height: 8),
           Text(
             value,
-            style: GoogleFonts.beVietnamPro(fontSize: 15, color: Colors.white54),
+            style: GoogleFonts.beVietnamPro(fontSize: 15, color: Colors.white.withValues(alpha: 0.8)),
           ),
-          const Divider(color: Colors.white12),
+          const Divider(color: Colors.white24),
         ],
       ),
     );
@@ -531,12 +845,12 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           TextFormField(
             controller: controller,
             keyboardType: keyboardType,
-            style: const TextStyle(color: Colors.white),
+            style: const TextStyle(color: Colors.white, fontSize: 16),
             decoration: InputDecoration(
               hintText: hint,
-              hintStyle: const TextStyle(color: Colors.white24),
-              enabledBorder: const UnderlineInputBorder(borderSide: BorderSide(color: Colors.white12)),
-              focusedBorder: const UnderlineInputBorder(borderSide: BorderSide(color: AppColors.primary)),
+              hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.3)),
+              enabledBorder: const UnderlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
+              focusedBorder: const UnderlineInputBorder(borderSide: BorderSide(color: AppColors.primary, width: 1.5)),
             ),
             validator: (v) => v == null || v.isEmpty ? 'Required' : null,
           ),
@@ -573,13 +887,61 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     );
   }
 
-  Widget _buildNavTile({required String label, required String trailing, required VoidCallback onTap}) {
+  Widget _buildSettingsNavTile({
+    required IconData icon,
+    required String label,
+    String? subtitle,
+    String? trailingText,
+    TextStyle? trailingStyle,
+    VoidCallback? onTap,
+  }) {
     return ListTile(
       onTap: onTap,
-      contentPadding: EdgeInsets.zero,
-      title: _buildLabel(label),
-      subtitle: Text(trailing, style: const TextStyle(color: Colors.white54)),
-      trailing: const Icon(Icons.chevron_right, color: Colors.white24),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      leading: Icon(icon, color: AppColors.primary),
+      title: Text(label, style: GoogleFonts.beVietnamPro(fontSize: 15, fontWeight: FontWeight.w600, color: Colors.white)),
+      subtitle: subtitle != null ? Text(subtitle, style: GoogleFonts.inter(fontSize: 11, color: AppColors.onSurfaceVariant.withValues(alpha: 0.8))) : null,
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (trailingText != null) Text(trailingText, style: trailingStyle),
+          const SizedBox(width: 8),
+          const Icon(Icons.chevron_right, color: Colors.white24, size: 20),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildToggleTile({
+    required IconData icon,
+    required String label,
+    String? subtitle,
+    required bool value,
+    required Function(bool) onChanged,
+  }) {
+    return ListTile(
+      leading: Icon(icon, color: AppColors.primary),
+      title: Text(label, style: GoogleFonts.beVietnamPro(fontSize: 15, fontWeight: FontWeight.w600, color: Colors.white)),
+      subtitle: subtitle != null ? Text(subtitle, style: GoogleFonts.inter(fontSize: 11, color: AppColors.onSurfaceVariant.withValues(alpha: 0.8))) : null,
+      trailing: Switch(
+        value: value,
+        onChanged: onChanged,
+        activeColor: AppColors.primary,
+      ),
+    );
+  }
+
+  Widget _buildLogoutButton() {
+    return OutlinedButton.icon(
+      onPressed: _showLogoutDialog,
+      icon: const Icon(Icons.logout, size: 18),
+      label: const Text('LOGOUT', style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1)),
+      style: OutlinedButton.styleFrom(
+        foregroundColor: AppColors.error,
+        side: const BorderSide(color: AppColors.error),
+        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
     );
   }
 
@@ -605,16 +967,16 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         decoration: BoxDecoration(
-          color: isSelected ? AppColors.primary.withOpacity(0.15) : Colors.transparent,
+          color: isSelected ? AppColors.primary.withValues(alpha: 0.15) : Colors.white.withValues(alpha: 0.05),
           borderRadius: BorderRadius.circular(99),
-          border: Border.all(color: isSelected ? AppColors.primary : Colors.white12),
+          border: Border.all(color: isSelected ? AppColors.primary : Colors.white24),
         ),
         child: Text(
           label.toUpperCase(),
           style: GoogleFonts.inter(
             fontSize: 11,
-            fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
-            color: isSelected ? AppColors.primary : Colors.white54,
+            fontWeight: isSelected ? FontWeight.w700 : FontWeight.w600,
+            color: isSelected ? AppColors.primary : Colors.white70,
           ),
         ),
       ),

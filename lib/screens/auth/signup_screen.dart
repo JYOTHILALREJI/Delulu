@@ -35,11 +35,13 @@ class _SignupScreenState extends State<SignupScreen> {
       final res = await ApiService.register(
         email: _emailController.text.trim(),
         password: _passwordController.text,
+        displayName: _nameController.text.trim(),
       );
       final body = jsonDecode(res.body);
 
       if (res.statusCode == 200 || res.statusCode == 201) {
         await ApiService.saveToken(body['token']);
+        await ApiService.saveUserData(false, _nameController.text.trim());
         if (!mounted) return;
         Navigator.of(context).pushReplacementNamed(
           '/onboarding',
@@ -51,7 +53,16 @@ class _SignupScreenState extends State<SignupScreen> {
       }
     } catch (e) {
       if (!mounted) return;
-      _showError('Cannot connect to server. Is the backend running?');
+      
+      final errorStr = e.toString().toLowerCase();
+      final isNetworkError = errorStr.contains('socketexception') || 
+                             errorStr.contains('timeoutexception') || 
+                             errorStr.contains('connection failed') ||
+                             errorStr.contains('host lookup');
+
+      _showError(isNetworkError 
+          ? 'Cannot connect to server. Is the backend running?' 
+          : 'An unexpected error occurred. Please try again.');
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }

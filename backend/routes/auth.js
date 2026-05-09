@@ -10,6 +10,7 @@ const SALT_ROUNDS = 12;
 
 // ── Register ──
 router.post('/register', async (req, res) => {
+  console.log(`[Auth] Register attempt for: ${req.body.email}`);
   try {
     const { email, password, display_name } = req.body;
 
@@ -119,12 +120,20 @@ router.get('/me', authMiddleware, async (req, res) => {
     const row = result.rows[0];
 
     // Fetch connection count
+    // Fetch connection count
     const connResult = await db.query(
       `SELECT COUNT(*) as count FROM connection_requests 
        WHERE (sender_id = $1 OR receiver_id = $1) AND status = 'accepted'`,
       [req.userId]
     );
     const connectCount = parseInt(connResult.rows[0].count);
+    
+    // Fetch likes count
+    const likesResult = await db.query(
+      `SELECT COUNT(*) as count FROM likes WHERE liked_user_id = $1`,
+      [req.userId]
+    );
+    const likesCount = parseInt(likesResult.rows[0].count);
 
     // Calculate Aura Score (Matching %)
     let auraScore = 40; // Base
@@ -174,6 +183,7 @@ router.get('/me', authMiddleware, async (req, res) => {
         is_premium: row.is_premium,
         last_attention_seeker_at: row.last_attention_seeker_at,
         connect_count: connectCount,
+        likes_count: likesCount,
         aura_score: auraScore
       },
     });

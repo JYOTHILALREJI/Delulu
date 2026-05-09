@@ -179,7 +179,7 @@ router.get('/profile/:userId', authMiddleware, async (req, res) => {
 
     const result = await db.query(`
       SELECT
-        u.id, u.is_verified, p.display_name, p.age, p.gender, p.interested_in, p.bio, p.interests, p.photos,
+        u.id, u.is_verified, p.display_name, p.age, p.gender, p.interested_in, p.bio, p.interests, p.photos, p.likes_count,
         EXISTS(SELECT 1 FROM likes WHERE liker_user_id = $2 AND liked_user_id = u.id) as is_liked,
         EXISTS(SELECT 1 FROM blocks WHERE blocker_id = $2 AND blocked_id = u.id) as is_blocked,
         (SELECT status FROM connection_requests WHERE (sender_id = $2 AND receiver_id = u.id) OR (sender_id = u.id AND receiver_id = $2) ORDER BY (status = 'accepted') DESC, created_at DESC LIMIT 1) as request_status
@@ -241,6 +241,22 @@ router.get('/profile/:userId', authMiddleware, async (req, res) => {
   } catch (err) {
     console.error('Public profile error:', err);
     res.status(500).json({ error: 'Failed to load profile' });
+  }
+});
+
+router.post('/profile/:userId/sync-likes', authMiddleware, async (req, res) => {
+  const { likesCount } = req.body;
+  const targetUserId = req.params.userId;
+
+  try {
+    await db.query(
+      'UPDATE profiles SET likes_count = $1 WHERE user_id = $2',
+      [likesCount, targetUserId]
+    );
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Sync likes error:', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 

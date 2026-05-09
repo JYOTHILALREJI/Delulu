@@ -138,7 +138,7 @@ app.use(cors({
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '50mb' }));
 
 // ── Routes ──
 app.use('/api/auth', authRoutes);
@@ -165,7 +165,7 @@ app.use((err, req, res, next) => {
 });
 
 // ── Start ──
-server.listen(PORT, () => {
-  console.log(`\n  Delulu API running on http://localhost:${PORT}`);
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`\n  Delulu API running on http://0.0.0.0:${PORT}`);
   console.log(`  Health: http://localhost:${PORT}/api/health\n`);
 });

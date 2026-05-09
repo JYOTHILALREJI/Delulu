@@ -29,7 +29,11 @@ router.put('/profile', authMiddleware, async (req, res) => {
       is_verified
     } = req.body;
 
-    console.log(`[Onboarding] Saving profile for user ${userId}. Data:`, req.body);
+    console.log(`[Onboarding] Saving profile for user ${userId}. Keys:`, Object.keys(req.body));
+    if (req.body.photos) {
+      console.log(`[Onboarding] Photos received: ${req.body.photos.length} items`);
+      console.log(`[Onboarding] First photo primary: ${req.body.photos[0]?.is_primary}`);
+    }
 
     // Validate required fields (only if onboarding for the first time, but here we support partial updates too)
     // For simplicity, we'll keep the required checks if they are provided.
@@ -56,13 +60,13 @@ router.put('/profile', authMiddleware, async (req, res) => {
         is_premium
       ) VALUES (
         $17, 
-        $1, 
-        $2, 
-        $3, 
-        $4, 
-        $5, 
-        $6, 
-        $7, 
+        COALESCE($1, ''), 
+        COALESCE($2, 18), 
+        COALESCE($3, ''), 
+        COALESCE($4, ''), 
+        COALESCE($5, ''), 
+        COALESCE($6, '[]')::jsonb, 
+        COALESCE($7, '[]')::jsonb, 
         COALESCE($8, TRUE), 
         COALESCE($9, TRUE), 
         COALESCE($10, TRUE), 
@@ -79,8 +83,8 @@ router.put('/profile', authMiddleware, async (req, res) => {
         bio = COALESCE($3, profiles.bio),
         gender = COALESCE($4, profiles.gender),
         interested_in = COALESCE($5, profiles.interested_in),
-        interests = COALESCE($6, profiles.interests),
-        photos = COALESCE($7, profiles.photos),
+        interests = COALESCE($6::jsonb, profiles.interests),
+        photos = COALESCE($7::jsonb, profiles.photos),
         online_status_enabled = COALESCE($8, profiles.online_status_enabled),
         typing_indicator_enabled = COALESCE($9, profiles.typing_indicator_enabled),
         last_seen_enabled = COALESCE($10, profiles.last_seen_enabled),
@@ -102,6 +106,8 @@ router.put('/profile', authMiddleware, async (req, res) => {
       is_premium,
       userId
     ]);
+    
+    console.log(`[Onboarding] Profile UPSERT completed. Rows affected: ${result.rowCount}`);
 
     // Update is_verified in users table if provided
     if (is_verified !== undefined) {

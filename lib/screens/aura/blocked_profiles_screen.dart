@@ -35,7 +35,9 @@ class _BlockedProfilesScreenState extends State<BlockedProfilesScreen> {
         // Pre-cache avatars
         for (var user in users) {
           final photos = user['photos'] as List? ?? [];
-          final primaryPhoto = photos.firstWhere((p) => p['is_primary'] == true, orElse: () => photos.isNotEmpty ? photos[0] : null);
+          final primaryPhoto = photos.isNotEmpty 
+              ? photos.firstWhere((p) => p['is_primary'] == true, orElse: () => photos[0])
+              : null;
           final avatarUrl = primaryPhoto?['url'] as String?;
           
           if (avatarUrl != null && !_avatarCache.containsKey(avatarUrl)) {
@@ -92,7 +94,9 @@ class _BlockedProfilesScreenState extends State<BlockedProfilesScreen> {
                     itemBuilder: (context, index) {
                       final user = _blockedUsers[index];
                       final photos = user['photos'] as List? ?? [];
-                      final primaryPhoto = photos.firstWhere((p) => p['is_primary'] == true, orElse: () => photos.isNotEmpty ? photos[0] : null);
+                      final primaryPhoto = photos.isNotEmpty 
+                          ? photos.firstWhere((p) => p['is_primary'] == true, orElse: () => photos[0])
+                          : null;
                       final avatarUrl = primaryPhoto?['url'];
 
                       return Container(

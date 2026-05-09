@@ -37,26 +37,21 @@ router.get('/liked', authMiddleware, async (req, res) => {
     try {
         const result = await db.query(
             `SELECT
-         u.id as user_id,
-         p.display_name,
-         p.age,
-         p.bio,
-         p.interests,
-         p.photos,
-         l.created_at as liked_at,
-         cr.status as request_status,
-         cr.id as request_id
-       FROM likes l
-       JOIN users u ON u.id = l.liked_user_id
-       JOIN profiles p ON p.user_id = u.id
-       LEFT JOIN connection_requests cr ON (cr.sender_id = l.liker_user_id AND cr.receiver_id = l.liked_user_id)
-       WHERE l.liker_user_id = $1
-         AND NOT EXISTS (
-           SELECT 1 FROM channels ch
-           WHERE (ch.user1_id = l.liker_user_id AND ch.user2_id = l.liked_user_id)
-              OR (ch.user1_id = l.liked_user_id AND ch.user2_id = l.liker_user_id)
-         )
-       ORDER BY l.created_at DESC`,
+          u.id as user_id,
+          p.display_name,
+          p.age,
+          p.bio,
+          p.interests,
+          p.photos,
+          l.created_at as liked_at,
+          cr.status as request_status,
+          cr.id as request_id
+        FROM likes l
+        JOIN users u ON u.id = l.liked_user_id
+        JOIN profiles p ON p.user_id = u.id
+        LEFT JOIN connection_requests cr ON (cr.sender_id = l.liker_user_id AND cr.receiver_id = l.liked_user_id)
+        WHERE l.liker_user_id = $1
+        ORDER BY l.created_at DESC`,
             [req.userId]
         );
 
@@ -106,21 +101,21 @@ router.get('/history', authMiddleware, async (req, res) => {
     try {
         const result = await db.query(
             `SELECT
-         u.id as user_id,
-         p.display_name,
-         p.age,
-         p.bio,
-         p.interests,
-         p.photos,
-         l.created_at as liked_at,
-         'connected' as status
-       FROM likes l
-       JOIN users u ON u.id = l.liked_user_id
-       JOIN profiles p ON p.user_id = u.id
-       JOIN channels ch ON (ch.user1_id = l.liker_user_id AND ch.user2_id = l.liked_user_id)
-                        OR (ch.user1_id = l.liked_user_id AND ch.user2_id = l.liker_user_id)
-       WHERE l.liker_user_id = $1
-       ORDER BY l.created_at DESC`,
+          u.id as user_id,
+          p.display_name,
+          p.age,
+          p.bio,
+          p.interests,
+          p.photos,
+          l.created_at as liked_at,
+          'connected' as status
+        FROM likes l
+        JOIN users u ON u.id = l.liked_user_id
+        JOIN profiles p ON p.user_id = u.id
+        JOIN channels ch ON (ch.user1_id = l.liker_user_id AND ch.user2_id = l.liked_user_id)
+                         OR (ch.user1_id = l.liked_user_id AND ch.user2_id = l.liker_user_id)
+        WHERE l.liker_user_id = $1
+        ORDER BY l.created_at DESC`,
             [req.userId]
         );
 
@@ -146,6 +141,56 @@ router.get('/history', authMiddleware, async (req, res) => {
         res.json({ profiles });
     } catch (err) {
         console.error('Fetch liked history error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Get profiles that liked the current user (The Vault)
+router.get('/received', authMiddleware, async (req, res) => {
+    try {
+        const result = await db.query(
+            `SELECT
+          u.id as user_id,
+          p.display_name,
+          p.age,
+          p.bio,
+          p.interests,
+          p.photos,
+          l.created_at as liked_at
+        FROM likes l
+        JOIN users u ON u.id = l.liker_user_id
+        JOIN profiles p ON p.user_id = u.id
+        WHERE l.liked_user_id = $1
+          AND NOT EXISTS (
+              SELECT 1 FROM blocks 
+              WHERE (blocker_id = $1 AND blocked_id = l.liker_user_id)
+                 OR (blocker_id = l.liker_user_id AND blocked_id = $1)
+          )
+        ORDER BY l.created_at DESC`,
+            [req.userId]
+        );
+
+        const parseField = (field) => {
+            if (!field) return [];
+            if (typeof field === 'string') {
+                try { return JSON.parse(field); } catch (_) { return []; }
+            }
+            return field;
+        };
+
+        const profiles = result.rows.map(row => ({
+            id: row.user_id,
+            display_name: row.display_name,
+            age: row.age,
+            bio: row.bio,
+            interests: parseField(row.interests),
+            photos: parseField(row.photos),
+            liked_at: row.liked_at,
+        }));
+
+        res.json({ profiles });
+    } catch (err) {
+        console.error('Fetch received likes error:', err);
         res.status(500).json({ error: 'Internal server error' });
     }
 });

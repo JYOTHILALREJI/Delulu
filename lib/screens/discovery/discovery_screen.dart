@@ -160,11 +160,16 @@ class DiscoveryScreenState extends State<DiscoveryScreen> {
 
   void _nextProfile() {
     if (_currentProfileIndex < _profiles.length - 1) {
+      final nextProfile = _profiles[_currentProfileIndex + 1];
+      final photos = List<Map<String, dynamic>>.from(nextProfile['photos'] ?? []);
+      int primaryIndex = photos.indexWhere((p) => p['is_primary'] == true);
+      if (primaryIndex == -1) primaryIndex = 0;
+
       setState(() {
         _currentProfileIndex++;
-        _currentImageIndex = 0; // reset photo index
+        _currentImageIndex = primaryIndex;
       });
-      _pageController.jumpToPage(0);
+      _pageController.jumpToPage(primaryIndex);
       
       // Infinite scroll trigger: load more when 3 profiles from the end
       if (_currentProfileIndex >= _profiles.length - 3) {
@@ -177,11 +182,16 @@ class DiscoveryScreenState extends State<DiscoveryScreen> {
 
   void _prevProfile() {
     if (_currentProfileIndex > 0) {
+      final prevProfile = _profiles[_currentProfileIndex - 1];
+      final photos = List<Map<String, dynamic>>.from(prevProfile['photos'] ?? []);
+      int primaryIndex = photos.indexWhere((p) => p['is_primary'] == true);
+      if (primaryIndex == -1) primaryIndex = 0;
+
       setState(() {
         _currentProfileIndex--;
-        _currentImageIndex = 0;
+        _currentImageIndex = primaryIndex;
       });
-      _pageController.jumpToPage(0);
+      _pageController.jumpToPage(primaryIndex);
     } else {
       _showCustomToast('Refreshing your feed...', isError: false);
       _fetchFeed();
@@ -544,13 +554,19 @@ class DiscoveryScreenState extends State<DiscoveryScreen> {
                         // Aura Button at the right corner
                         InkWell(
                           borderRadius: BorderRadius.circular(20),
-                          onTap: () {
-                            Navigator.push(
+                          onTap: () async {
+                            final result = await Navigator.push(
                               context,
                               MaterialPageRoute(
                                 builder: (_) => PublicAuraScreen(userId: profile['id'].toString()),
                               ),
                             );
+                            if (result != null && result is Map<String, dynamic> && mounted) {
+                              setState(() {
+                                _profiles[_currentProfileIndex]['is_liked'] = result['is_liked'];
+                                _profiles[_currentProfileIndex]['request_status'] = result['request_status'];
+                              });
+                            }
                           },
                           child: Container(
                             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
@@ -688,40 +704,52 @@ class DiscoveryScreenState extends State<DiscoveryScreen> {
                             child: InkWell(
                               borderRadius: BorderRadius.circular(16),
                               onTap: () async {
-                                if (profile['is_liked'] == true) return;
-                                try {
-                                  final res = await ApiService.likeUser(profile['id']);
-                                  if (res.statusCode == 200 && mounted) {
-                                    setState(() {
-                                      _profiles[_currentProfileIndex]['is_liked'] = true;
-                                    });
-                                    _showCustomToast('Liked!');
-                                  }
-                                } catch (_) {}
+                                if (profile['is_liked'] == true) {
+                                  try {
+                                    final res = await ApiService.deleteLike(profile['id']);
+                                    if (res.statusCode == 200 && mounted) {
+                                      setState(() {
+                                        _profiles[_currentProfileIndex]['is_liked'] = false;
+                                      });
+                                    }
+                                  } catch (_) {}
+                                } else {
+                                  try {
+                                    final res = await ApiService.likeUser(profile['id']);
+                                    if (res.statusCode == 200 && mounted) {
+                                      setState(() {
+                                        _profiles[_currentProfileIndex]['is_liked'] = true;
+                                      });
+                                    }
+                                  } catch (_) {}
+                                }
                               },
                               child: Container(
                                 height: 56,
                                 decoration: BoxDecoration(
                                   borderRadius: BorderRadius.circular(16),
-                                  color: Colors.white.withValues(alpha: 0.05),
-                                  border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+                                  color: profile['is_liked'] == true 
+                                    ? AppColors.tertiary 
+                                    : AppColors.primary,
+                                  border: profile['is_liked'] == true 
+                                    ? Border.all(color: Colors.white.withValues(alpha: 0.1))
+                                    : null,
                                 ),
                                 child: Row(
                                   mainAxisAlignment: MainAxisAlignment.center,
                                   children: [
                                     Icon(
                                       profile['is_liked'] == true ? Icons.favorite : Icons.favorite_border,
-                                      color: profile['is_liked'] == true ? AppColors.tertiary : AppColors.onSurfaceVariant,
+                                      color: profile['is_liked'] == true ? Colors.white : Colors.black,
                                       size: 20,
                                     ),
-                                    const SizedBox(width: 4),
+                                    const SizedBox(width: 8),
                                     Text(
                                       profile['is_liked'] == true ? 'Liked' : 'Like',
-                                      style: TextStyle(
-                                        fontFamily: 'Inter',
-                                        fontSize: 10,
-                                        fontWeight: profile['is_liked'] == true ? FontWeight.w700 : FontWeight.w600,
-                                        color: profile['is_liked'] == true ? AppColors.tertiary : AppColors.onSurface,
+                                      style: GoogleFonts.inter(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w700,
+                                        color: profile['is_liked'] == true ? Colors.white : Colors.black,
                                       ),
                                     ),
                                   ],
@@ -821,7 +849,10 @@ class DiscoveryScreenState extends State<DiscoveryScreen> {
                                     } else if (photosData is List) {
                                       photosList = List<Map<String, dynamic>>.from(photosData);
                                     }
-                                    final avatarUrl = photosList.isNotEmpty ? photosList[0]['url'] : null;
+                                    final primaryPhoto = photosList.isNotEmpty 
+                                        ? photosList.firstWhere((p) => p['is_primary'] == true, orElse: () => photosList[0])
+                                        : null;
+                                    final avatarUrl = primaryPhoto?['url'];
 
                                     Navigator.push(
                                       context,

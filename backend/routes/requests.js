@@ -188,4 +188,42 @@ router.get('/history', authMiddleware, async (req, res) => {
     }
 });
 
+// Disconnect (revoke connection)
+router.post('/disconnect', authMiddleware, async (req, res) => {
+    const userId = req.userId;
+    const { otherUserId } = req.body;
+
+    if (!otherUserId) return res.status(400).json({ error: 'otherUserId required' });
+
+    const client = await db.getClient();
+    try {
+        await client.query('BEGIN');
+
+        // Delete from connection_requests
+        await client.query(
+            `DELETE FROM connection_requests 
+             WHERE (sender_id = $1 AND receiver_id = $2) 
+                OR (sender_id = $2 AND receiver_id = $1)`,
+            [userId, otherUserId]
+        );
+
+        // Delete from channels
+        const [u1, u2] = [userId, otherUserId].sort();
+        await client.query(
+            `DELETE FROM channels 
+             WHERE user1_id = $1 AND user2_id = $2`,
+            [u1, u2]
+        );
+
+        await client.query('COMMIT');
+        res.json({ success: true });
+    } catch (err) {
+        await client.query('ROLLBACK');
+        console.error('Disconnect error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    } finally {
+        client.release();
+    }
+});
+
 module.exports = router;

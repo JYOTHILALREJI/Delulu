@@ -7,7 +7,7 @@ class ApiService {
   static const String baseUrl = 'http://192.168.100.2:3000/api';
 
   // Define the timeout duration
-  static const Duration _timeout = Duration(seconds: 30);
+  static const Duration _timeout = Duration(seconds: 60);
 
   static Map<String, String> get _headers => {
         'Content-Type': 'application/json',
@@ -31,9 +31,25 @@ class ApiService {
     return prefs.getString('auth_token');
   }
 
+  static Future<void> saveUserData(bool isOnboarded, String displayName) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('is_onboarded', isOnboarded);
+    await prefs.setString('display_name', displayName);
+  }
+
+  static Future<Map<String, dynamic>> getUserData() async {
+    final prefs = await SharedPreferences.getInstance();
+    return {
+      'is_onboarded': prefs.getBool('is_onboarded') ?? false,
+      'display_name': prefs.getString('display_name') ?? '',
+    };
+  }
+
   static Future<void> clearToken() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('auth_token');
+    await prefs.remove('is_onboarded');
+    await prefs.remove('display_name');
   }
 
   static Future<http.Response> getVersion() async {
@@ -142,6 +158,13 @@ class ApiService {
     final headers = await authHeaders();
     return http
         .get(Uri.parse('$baseUrl/likes/history'), headers: headers)
+        .timeout(_timeout);
+  }
+
+  static Future<http.Response> getReceivedLikes() async {
+    final headers = await authHeaders();
+    return http
+        .get(Uri.parse('$baseUrl/likes/received'), headers: headers)
         .timeout(_timeout);
   }
 
@@ -260,6 +283,24 @@ class ApiService {
     final headers = await authHeaders();
     return http
         .get(Uri.parse('$baseUrl/whispers/blocked'), headers: headers)
+        .timeout(_timeout);
+  }
+
+  static Future<http.Response> disconnectUser(String otherUserId) async {
+    final headers = await authHeaders();
+    return http
+        .post(Uri.parse('$baseUrl/requests/disconnect'),
+            headers: headers,
+            body: jsonEncode({'otherUserId': otherUserId}))
+        .timeout(_timeout);
+  }
+
+  static Future<http.Response> syncLikes(String userId, int likesCount) async {
+    final headers = await authHeaders();
+    return http
+        .post(Uri.parse('$baseUrl/discovery/profile/$userId/sync-likes'),
+            headers: headers,
+            body: jsonEncode({'likesCount': likesCount}))
         .timeout(_timeout);
   }
 

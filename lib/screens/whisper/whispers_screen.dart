@@ -79,7 +79,10 @@ class WhispersScreenState extends State<WhispersScreen> {
         for (var conn in conns) {
           final profile = conn['profile'] as Map<String, dynamic>;
           final photos = List<Map<String, dynamic>>.from(profile['photos'] ?? []);
-          final avatarUrl = photos.isNotEmpty ? photos[0]['url'] as String? : null;
+          final primaryPhoto = photos.isNotEmpty 
+              ? photos.firstWhere((p) => p['is_primary'] == true, orElse: () => photos[0])
+              : null;
+          final avatarUrl = primaryPhoto?['url'] as String?;
           
           if (avatarUrl != null && !_avatarCache.containsKey(avatarUrl)) {
             if (avatarUrl.startsWith('data:image')) {
@@ -175,7 +178,10 @@ class WhispersScreenState extends State<WhispersScreen> {
                   final conn = _connections[index];
                   final profile = conn['profile'] as Map<String, dynamic>;
                   final photos = List<Map<String, dynamic>>.from(profile['photos'] ?? []);
-                  final avatarUrl = photos.isNotEmpty ? photos[0]['url'] : null;
+                  final primaryPhoto = photos.isNotEmpty 
+                      ? photos.firstWhere((p) => p['is_primary'] == true, orElse: () => photos[0])
+                      : null;
+                  final avatarUrl = primaryPhoto?['url'];
                   final lastMsg = conn['last_message'] as String?;
                   final lastTime = conn['last_message_time'] as String?;
 

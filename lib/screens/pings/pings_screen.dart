@@ -290,7 +290,10 @@ class _RequestCardState extends State<RequestCard> {
   Widget build(BuildContext context) {
     final sender = widget.request['sender'] as Map<String, dynamic>;
     final photos = List<Map<String, dynamic>>.from(sender['photos'] ?? []);
-    final imageUrl = photos.isNotEmpty ? photos[0]['url'] : null;
+    final primaryPhoto = photos.isNotEmpty 
+        ? photos.firstWhere((p) => p['is_primary'] == true, orElse: () => photos[0])
+        : null;
+    final imageUrl = primaryPhoto?['url'];
     final interests = List<String>.from(sender['interests'] ?? []);
     final requestId = widget.request['request_id'] as int;
     final bio = sender['bio'] ?? '';
