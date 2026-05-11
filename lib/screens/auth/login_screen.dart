@@ -335,7 +335,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                     .withValues(alpha: 0.4)),
                             const SizedBox(width: 6),
                             Text(
-                              'End-to-End Encryption Enabled',
+                              'End-to-End Encryption Available',
                               style: GoogleFonts.inter(
                                 fontSize: 10,
                                 color:

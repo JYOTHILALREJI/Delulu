@@ -1,11 +1,13 @@
 import 'dart:convert';
 import 'dart:ui';
+import 'package:flutter/foundation.dart';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../theme/app_colors.dart';
 import '../../services/api_service.dart';
+import '../premium/subscription_screen.dart';
 import '../../components/delulu_wavy_loader.dart';
 
 class PublicAuraScreen extends StatefulWidget {
@@ -37,7 +39,7 @@ class _PublicAuraScreenState extends State<PublicAuraScreen> {
     try {
       final res = await ApiService.getPublicProfile(widget.userId);
       if (res.statusCode == 200) {
-        final body = jsonDecode(res.body);
+        final body = await compute(jsonDecode, res.body);
         _profile = body['profile'];
         _initialLikesCount = _profile?['likes_count'] ?? 0;
       }
@@ -45,7 +47,7 @@ class _PublicAuraScreenState extends State<PublicAuraScreen> {
       // Fetch current user's premium status
       final meRes = await ApiService.getMe();
       if (meRes.statusCode == 200) {
-        final meBody = jsonDecode(meRes.body);
+        final meBody = await compute(jsonDecode, meRes.body);
         _isMePremium = meBody['user']?['is_premium'] ?? false;
       }
 
@@ -304,18 +306,28 @@ class _PublicAuraScreenState extends State<PublicAuraScreen> {
         child: Scaffold(
           backgroundColor: Colors.transparent,
           appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
-          onPressed: () {
-            _syncLikesCount();
-            Navigator.pop(context, {
-              'is_liked': _profile?['is_liked'],
-              'request_status': _profile?['request_status'],
-            });
-          },
-        ),
+            backgroundColor: Colors.transparent,
+            elevation: 0,
+            centerTitle: true,
+            title: Text(
+              'DELULU',
+              style: GoogleFonts.outfit(
+                color: Colors.white,
+                fontSize: 18,
+                fontWeight: FontWeight.w900,
+                letterSpacing: 4,
+              ),
+            ),
+            leading: IconButton(
+              icon: const Icon(Icons.arrow_back, color: Colors.white),
+              onPressed: () {
+                _syncLikesCount();
+                Navigator.pop(context, {
+                  'is_liked': _profile?['is_liked'],
+                  'request_status': _profile?['request_status'],
+                });
+              },
+            ),
         actions: [
           PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert, color: Colors.white),
@@ -380,35 +392,37 @@ class _PublicAuraScreenState extends State<PublicAuraScreen> {
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
         child: Column(
           children: [
-            _buildPublicProfileTitle(displayName),
+            RepaintBoundary(child: _buildPublicProfileTitle(displayName)),
             const SizedBox(height: 32),
             
             // Glass Card for Profile Details
-            ClipRRect(
-              borderRadius: BorderRadius.circular(32),
-              child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.08),
-                    borderRadius: BorderRadius.circular(32),
-                    border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
-                  ),
-                  child: Column(
-                    children: [
-                      _buildProfileHeader(displayName, age),
-                      const SizedBox(height: 20),
-                      
-                      _buildStatsSection(
-                        connections: _profile?['connect_count'] ?? 0,
-                        likes: _profile?['likes_count'] ?? 0,
-                        auraScore: _profile?['aura_score'] ?? 0,
-                      ),
-                      
-                      const SizedBox(height: 20),
-                      _buildBioSection(bio),
-                    ],
+            RepaintBoundary(
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(32),
+                child: BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(32),
+                      border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+                    ),
+                    child: Column(
+                      children: [
+                        _buildProfileHeader(displayName, age),
+                        const SizedBox(height: 20),
+                        
+                        _buildStatsSection(
+                          connections: _profile?['connect_count'] ?? 0,
+                          likes: _profile?['likes_count'] ?? 0,
+                          auraScore: _profile?['aura_score'] ?? 0,
+                        ),
+                        
+                        const SizedBox(height: 20),
+                        _buildBioSection(bio),
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -476,8 +490,13 @@ class _PublicAuraScreenState extends State<PublicAuraScreen> {
             
             const SizedBox(height: 40),
             
+            if (!_isMePremium) ...[
+              _buildRizzPlusBanner(),
+              const SizedBox(height: 40),
+            ],
+
             // Gallery Section
-            if (photos.isNotEmpty) _buildGallerySection(photos),
+            if (photos.isNotEmpty) RepaintBoundary(child: _buildGallerySection(photos)),
             
             const SizedBox(height: 40),
           ],
@@ -493,9 +512,9 @@ class _PublicAuraScreenState extends State<PublicAuraScreen> {
     return Align(
       alignment: Alignment.centerLeft,
       child: Text(
-        "$name's Aura",
+        "The Aura",
         style: GoogleFonts.beVietnamPro(
-          fontSize: 32,
+          fontSize: 28,
           fontWeight: FontWeight.w800,
           color: Colors.white,
           letterSpacing: -1,
@@ -516,7 +535,7 @@ class _PublicAuraScreenState extends State<PublicAuraScreen> {
               child: Text(
                 '$name, $age',
                 style: GoogleFonts.beVietnamPro(
-                  fontSize: 32,
+                  fontSize: 28,
                   fontWeight: FontWeight.w800,
                   color: Colors.white,
                 ),
@@ -577,7 +596,7 @@ class _PublicAuraScreenState extends State<PublicAuraScreen> {
         Text(
           value,
           style: GoogleFonts.beVietnamPro(
-            fontSize: 26,
+            fontSize: 22,
             fontWeight: FontWeight.w900,
             color: Colors.white,
           ),
@@ -778,6 +797,76 @@ class _PublicAuraScreenState extends State<PublicAuraScreen> {
                 ),
               ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRizzPlusBanner() {
+    return Container(
+      width: double.infinity,
+      height: 70,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        gradient: const LinearGradient(
+          colors: [Color(0xFFFFD700), Color(0xFFFFA500)],
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFFFFA500).withOpacity(0.3),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: () async {
+            final result = await Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const SubscriptionScreen()),
+            );
+            if (result == true) {
+              _loadProfile();
+            }
+          },
+          borderRadius: BorderRadius.circular(20),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Row(
+              children: [
+                const Icon(Icons.bolt, color: Colors.black, size: 28),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Upgrade to Rizz+',
+                        style: GoogleFonts.beVietnamPro(
+                          fontWeight: FontWeight.w900,
+                          color: Colors.black,
+                          fontSize: 14,
+                        ),
+                      ),
+                      Text(
+                        'Unlimited plays & see who likes you',
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.inter(
+                          color: Colors.black.withOpacity(0.7),
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const Icon(Icons.chevron_right, color: Colors.black),
+              ],
+            ),
           ),
         ),
       ),

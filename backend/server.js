@@ -8,6 +8,8 @@ const discoveryRoutes = require('./routes/discovery');
 const likesRoutes = require('./routes/likes');
 const requestsRoutes = require('./routes/requests');
 const whispersRoutes = require('./routes/whispers');
+const gamesRoutes = require('./routes/games');
+const premiumRoutes = require('./routes/premium');
 
 const http = require('http');
 const socketManager = require('./socket');
@@ -38,8 +40,8 @@ io.use((socket, next) => {
 io.on('connection', async (socket) => {
   const userId = socket.userId;
   console.log(`User connected to socket: ${userId}`);
-  
-  socket.join(userId);
+
+  socket.join(userId.toString());
 
   // Fetch privacy settings
   let onlineEnabled = true;
@@ -59,13 +61,19 @@ io.on('connection', async (socket) => {
     }
   }
 
-  socket.on('typing', (data) => {
+  socket.on('typing', async (data) => {
     // data: { channelId, peerId, isTyping }
-    io.to(data.peerId).emit('typing_status', { 
-      channelId: data.channelId, 
-      userId: userId, 
-      isTyping: data.isTyping 
-    });
+    try {
+      const res = await db.query('SELECT typing_indicator_enabled FROM profiles WHERE user_id = $1', [userId]);
+      if (res.rows.length > 0 && res.rows[0].typing_indicator_enabled === false) {
+        return; // Don't broadcast if disabled
+      }
+      io.to(data.peerId.toString()).emit('typing_status', {
+        channelId: data.channelId,
+        userId: userId,
+        isTyping: data.isTyping
+      });
+    } catch (err) {}
   });
 
   socket.on('attention_seeker', async (data) => {
@@ -84,18 +92,26 @@ io.on('connection', async (socket) => {
         'SELECT last_attention_seeker_at, is_premium FROM profiles WHERE user_id = $1',
         [userId]
       );
-      
+
       if (userRes.rows.length > 0) {
-        const { last_attention_seeker_at, is_premium } = userRes.rows[0];
-        if (last_attention_seeker_at) {
-          const lastUse = new Date(last_attention_seeker_at);
+        const profile = userRes.rows[0];
+        if (profile.last_attention_seeker_at) {
+          if (!profile.is_premium) {
+            socket.emit('error_message', {
+              message: 'Attention Seeker is a Premium feature after your first use. Upgrade to Rizz+ to continue!',
+              type: 'attention_premium_required'
+            });
+            return;
+          }
+
+          const lastUse = new Date(profile.last_attention_seeker_at);
           const now = new Date();
           const diffMs = now - lastUse;
-          const cooldownMs = is_premium ? 30 * 60 * 1000 : 7 * 24 * 60 * 60 * 1000;
-          
+          const cooldownMs = 15 * 60 * 1000; // 15 minutes for Premium
+
           if (diffMs < cooldownMs) {
-            socket.emit('error_message', { 
-              message: 'Attention Seeker is on cooldown',
+            socket.emit('error_message', {
+              message: 'Attention Seeker is on cooldown. Please wait before seeking attention again.',
               type: 'attention_cooldown'
             });
             return;
@@ -112,9 +128,139 @@ io.on('connection', async (socket) => {
       );
 
       // Relay to peer
-      io.to(peerId).emit('attention_seeker_received', { fromId: userId });
+      io.to(peerId.toString()).emit('attention_seeker_received', { fromId: userId });
     } catch (err) {
       console.error('Attention seeker error:', err);
+    }
+  });
+
+  socket.on('game_invite', async (data) => {
+    // data: { channelId, peerId, gameId, gameName }
+    const { channelId, peerId, gameId, gameName } = data;
+    try {
+      // 1. Check if game is premium
+      const gameRes = await db.query('SELECT is_premium FROM games WHERE id = $1', [gameId]);
+      const isPremiumGame = gameRes.rows[0]?.is_premium === true;
+
+      // 2. Check if inviter is premium
+      const inviterRes = await db.query(
+        'SELECT display_name, is_premium FROM profiles WHERE user_id = $1',
+        [userId]
+      );
+      const isInviterPremium = inviterRes.rows[0]?.is_premium === true;
+      const fromName = inviterRes.rows[0]?.display_name || 'Partner';
+
+      // 3. Enforce rules
+      if (isPremiumGame && !isInviterPremium) {
+        socket.emit('error_message', {
+          message: 'Upgrade to Rizz+ to invite to premium games',
+          type: 'premium_required'
+        });
+        return;
+      }
+
+      const res = await db.query(
+        'INSERT INTO game_sessions (channel_id, inviter_id, receiver_id, game_id, game_name, status) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id',
+        [channelId, userId, peerId, gameId, gameName, 'pending']
+      );
+      const sessionId = res.rows[0].id;
+
+      socket.emit('game_invite_sent', { sessionId, fromName, ...data });
+
+      io.to(peerId.toString()).emit('game_invite_received', {
+        ...data,
+        sessionId,
+        fromName,
+        fromId: userId
+      });
+    } catch (err) {
+      console.error('Game invite error:', err);
+    }
+  });
+
+  socket.on('game_invite_response', async (data) => {
+    // data: { channelId, peerId, sessionId, accepted }
+    const { channelId, peerId, sessionId, accepted } = data;
+    const status = accepted ? 'accepted' : 'rejected';
+
+    try {
+      const sessionCheck = await db.query('SELECT game_id, game_name FROM game_sessions WHERE id = $1', [sessionId]);
+      const gameId = sessionCheck.rows[0]?.game_id;
+      const gameName = sessionCheck.rows[0]?.game_name;
+
+      await db.query(
+        'UPDATE game_sessions SET status = $1, updated_at = NOW() WHERE id = $2',
+        [status, sessionId]
+      );
+
+      // Create a status message in the chat
+      const msgRes = await db.query(
+        'INSERT INTO messages (channel_id, sender_id, content, message_type) VALUES ($1, $2, $3, $4) RETURNING *',
+        [channelId, userId, JSON.stringify({ sessionId, status, gameId, gameName }), 'game_status']
+      );
+
+      io.to(peerId.toString()).emit('game_invite_response_received', {
+        ...data,
+        status,
+        fromId: userId
+      });
+
+      // Broadcast new message to both
+      io.to(userId.toString()).to(peerId.toString()).emit('new_message', msgRes.rows[0]);
+    } catch (err) {
+      console.error('Game response error:', err);
+    }
+  });
+
+  socket.on('game_cancel', async (data) => {
+    // data: { sessionId, peerId, channelId }
+    const { sessionId, peerId, channelId } = data;
+    let actualSessionId = sessionId;
+    try {
+      if (!actualSessionId) {
+        // Find latest pending session for this channel/user if sessionId not yet known
+        const pendingCheck = await db.query(
+          'SELECT id FROM game_sessions WHERE channel_id = $1 AND inviter_id = $2 AND status = $3 ORDER BY created_at DESC LIMIT 1',
+          [channelId, userId, 'pending']
+        );
+        if (pendingCheck.rows.length > 0) {
+          actualSessionId = pendingCheck.rows[0].id;
+        } else {
+          return;
+        }
+      }
+
+      const sessionCheck = await db.query('SELECT game_id, game_name FROM game_sessions WHERE id = $1', [actualSessionId]);
+      const gameId = sessionCheck.rows[0]?.game_id;
+      const gameName = sessionCheck.rows[0]?.game_name;
+
+      await db.query(
+        'UPDATE game_sessions SET status = $1, updated_at = NOW() WHERE id = $2',
+        ['cancelled', actualSessionId]
+      );
+
+      const msgRes = await db.query(
+        'INSERT INTO messages (channel_id, sender_id, content, message_type) VALUES ($1, $2, $3, $4) RETURNING *',
+        [channelId, userId, JSON.stringify({ sessionId: actualSessionId, status: 'cancelled', gameId, gameName }), 'game_status']
+      );
+
+      io.to(peerId.toString()).emit('game_cancelled', { sessionId: actualSessionId });
+      io.to(userId.toString()).to(peerId.toString()).emit('new_message', msgRes.rows[0]);
+    } catch (err) {
+      console.error('Game cancel error:', err);
+    }
+  });
+
+  socket.on('game_session_update', async (data) => {
+    // data: { sessionId, duration }
+    const { sessionId, duration } = data;
+    try {
+      await db.query(
+        'UPDATE game_sessions SET duration = $1, status = $2, updated_at = NOW() WHERE id = $3',
+        [duration, 'completed', sessionId]
+      );
+    } catch (err) {
+      console.error('Game session update error:', err);
     }
   });
 
@@ -147,6 +293,8 @@ app.use('/api/discovery', discoveryRoutes);
 app.use('/api/likes', likesRoutes);
 app.use('/api/requests', requestsRoutes);
 app.use('/api/whispers', whispersRoutes);
+app.use('/api/games', gamesRoutes);
+app.use('/api/premium', premiumRoutes);
 
 // ── Health Check ──
 app.get('/api/health', (req, res) => {

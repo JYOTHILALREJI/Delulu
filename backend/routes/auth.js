@@ -62,7 +62,7 @@ router.post('/login', async (req, res) => {
     }
 
     const result = await db.query(
-      'SELECT id, email, password_hash, display_name, is_onboarded FROM users WHERE email = $1',
+      'SELECT id, email, password_hash, display_name, is_onboarded, onboarding_step FROM users WHERE email = $1',
       [email.toLowerCase()]
     );
 
@@ -90,6 +90,7 @@ router.post('/login', async (req, res) => {
         email: user.email,
         display_name: user.display_name,
         is_onboarded: user.is_onboarded,
+        onboarding_step: user.onboarding_step,
       },
     });
   } catch (err) {
@@ -102,7 +103,7 @@ router.post('/login', async (req, res) => {
 router.get('/me', authMiddleware, async (req, res) => {
   try {
     const result = await db.query(
-      `SELECT u.id, u.email, u.display_name, u.is_onboarded, u.created_at, u.is_verified,
+      `SELECT u.id, u.email, u.display_name, u.is_onboarded, u.onboarding_step, u.created_at, u.is_verified,
               p.display_name AS profile_name, p.age, p.gender, p.interested_in, p.bio, p.interests, p.photos,
               p.online_status_enabled, p.typing_indicator_enabled, p.last_seen_enabled, p.read_receipt_enabled,
               p.latitude, p.longitude, p.live_location_enabled, p.location_name,
@@ -119,7 +120,6 @@ router.get('/me', authMiddleware, async (req, res) => {
 
     const row = result.rows[0];
 
-    // Fetch connection count
     // Fetch connection count
     const connResult = await db.query(
       `SELECT COUNT(*) as count FROM connection_requests 
@@ -165,6 +165,7 @@ router.get('/me', authMiddleware, async (req, res) => {
         email: row.email,
         display_name: row.profile_name || row.display_name || '',
         is_onboarded: row.is_onboarded,
+        onboarding_step: row.onboarding_step,
         is_verified: row.is_verified,
         age: row.age,
         gender: row.gender,
@@ -229,6 +230,44 @@ router.put('/update-password', authMiddleware, async (req, res) => {
     res.json({ success: true, message: 'Password updated successfully' });
   } catch (err) {
     console.error('Update password error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ── Get Notification Counts ──
+router.get('/notifications', authMiddleware, async (req, res) => {
+  try {
+    const userId = req.userId;
+
+    // 1. Unread Messages
+    const msgRes = await db.query(
+      `SELECT COUNT(*)::int FROM messages m
+       JOIN channels c ON m.channel_id = c.id
+       WHERE (c.user1_id = $1 OR c.user2_id = $1)
+         AND m.sender_id != $1
+         AND m.read_at IS NULL`,
+      [userId]
+    );
+
+    // 2. Pending Incoming Requests (Pings)
+    const reqRes = await db.query(
+      "SELECT COUNT(*)::int FROM connection_requests WHERE receiver_id = $1 AND status = 'pending'",
+      [userId]
+    );
+
+    // 3. Pending Game Invites (Whispers)
+    const gameRes = await db.query(
+      "SELECT COUNT(*)::int FROM game_sessions WHERE receiver_id = $1 AND status = 'pending'",
+      [userId]
+    );
+
+    res.json({
+      unread_messages: msgRes.rows[0].count,
+      pending_requests: reqRes.rows[0].count,
+      pending_game_invites: gameRes.rows[0].count,
+    });
+  } catch (err) {
+    console.error('Notification counts error:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

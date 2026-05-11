@@ -8,6 +8,12 @@ import 'package:http/http.dart' as http;
 import '../../theme/app_colors.dart';
 import '../../services/api_service.dart';
 import '../../utils/interests_data.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:geocoding/geocoding.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter/services.dart';
 
 class PhotoItem {
   final String path;
@@ -27,7 +33,7 @@ class OnboardingScreen extends StatefulWidget {
 
 class _OnboardingScreenState extends State<OnboardingScreen> {
   int _currentStep = 0;
-  final int _totalSteps = 4;
+  final int _totalSteps = 5;
 
   // Step 1: Basic Info
   final _nameController = TextEditingController();
@@ -49,6 +55,16 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   // Step 4: Photos
   final List<PhotoItem> _photoItems = [];
   final ImagePicker _imagePicker = ImagePicker();
+  
+  // Step 4: Location (New)
+  bool _liveLocationEnabled = false;
+  double? _latitude;
+  double? _longitude;
+  String? _locationName;
+  bool _isLocationLoading = false;
+  GoogleMapController? _mapController;
+  final _locationSearchController = TextEditingController();
+  Marker? _selectedMarker;
 
   bool _isLoading = false;
   bool _nameFetchedFromDb = false;
@@ -71,6 +87,11 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     _bioFocusNode.addListener(() => _scrollToField(_bioFocusNode));
     _interestsFocusNode.addListener(() => _scrollToField(_interestsFocusNode));
 
+    // Auto-save on text change
+    _nameController.addListener(_saveLocal);
+    _ageController.addListener(_saveLocal);
+    _bioController.addListener(_saveLocal);
+
     if (widget.initialName != null && widget.initialName!.isNotEmpty) {
       _nameController.text = widget.initialName!;
       _nameFetchedFromDb = true;
@@ -78,6 +99,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       _fetchDisplayName();
     }
     _suggestedInterests = InterestsData.getRandomInterests(10);
+    _loadLocal().then((_) => _fetchOnboardingProgress());
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
@@ -91,7 +113,133 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     });
   }
 
+  Future<void> _saveLocal() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('ob_name', _nameController.text);
+      await prefs.setString('ob_age', _ageController.text);
+      await prefs.setString('ob_gender', _selectedGender);
+      await prefs.setString('ob_seeking', _selectedSeeking);
+      await prefs.setString('ob_bio', _bioController.text);
+      await prefs.setString('ob_interests', jsonEncode(_interests));
+      await prefs.setInt('ob_step', _currentStep);
+      if (_latitude != null) await prefs.setDouble('ob_lat', _latitude!);
+      if (_longitude != null) await prefs.setDouble('ob_lon', _longitude!);
+      if (_locationName != null) await prefs.setString('ob_location_name', _locationName!);
+    } catch (_) {}
+  }
+
+  Future<void> _loadLocal() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final name = prefs.getString('ob_name') ?? '';
+      final age = prefs.getString('ob_age') ?? '';
+      final gender = prefs.getString('ob_gender') ?? '';
+      final seeking = prefs.getString('ob_seeking') ?? '';
+      final bio = prefs.getString('ob_bio') ?? '';
+      final interestsJson = prefs.getString('ob_interests') ?? '[]';
+      final step = prefs.getInt('ob_step') ?? 0;
+      final lat = prefs.getDouble('ob_lat');
+      final lon = prefs.getDouble('ob_lon');
+      final locationName = prefs.getString('ob_location_name');
+
+      if (mounted) {
+        setState(() {
+          if (name.isNotEmpty) _nameController.text = name;
+          if (age.isNotEmpty) _ageController.text = age;
+          if (gender.isNotEmpty) _selectedGender = gender;
+          if (seeking.isNotEmpty) _selectedSeeking = seeking;
+          if (bio.isNotEmpty) _bioController.text = bio;
+          try {
+            final list = jsonDecode(interestsJson) as List;
+            _interests.clear();
+            _interests.addAll(list.cast<String>());
+          } catch (_) {}
+          _currentStep = step.clamp(0, _totalSteps - 1);
+          if (lat != null && lon != null) {
+            _latitude = lat;
+            _longitude = lon;
+            _liveLocationEnabled = true;
+            _selectedMarker = Marker(
+              markerId: const MarkerId('selected'),
+              position: LatLng(lat, lon),
+            );
+          }
+          if (locationName != null) _locationName = locationName;
+        });
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _clearLocal() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('ob_name');
+      await prefs.remove('ob_age');
+      await prefs.remove('ob_gender');
+      await prefs.remove('ob_seeking');
+      await prefs.remove('ob_bio');
+      await prefs.remove('ob_interests');
+      await prefs.remove('ob_step');
+      await prefs.remove('ob_lat');
+      await prefs.remove('ob_lon');
+      await prefs.remove('ob_location_name');
+    } catch (_) {}
+  }
+
+  Future<void> _fetchOnboardingProgress() async {
+    try {
+      final res = await ApiService.getMe();
+      if (res.statusCode == 200) {
+        final body = jsonDecode(res.body);
+        final serverStep = body['user']?['onboarding_step'] ?? 0;
+        final name = body['user']?['display_name'] ?? '';
+        final age = body['user']?['age'];
+        final gender = body['user']?['gender'];
+        final seeking = body['user']?['interested_in'];
+        final bio = body['user']?['bio'];
+        final interests = body['user']?['interests'];
+        final lat = body['user']?['latitude'];
+        final lon = body['user']?['longitude'];
+        final locationName = body['user']?['location_name'];
+
+        if (mounted) {
+          setState(() {
+            // Only override local step if server is ahead
+            if (serverStep > _currentStep) {
+              _currentStep = (serverStep as int).clamp(0, _totalSteps - 1);
+            }
+            if (name.isNotEmpty && _nameController.text.isEmpty) _nameController.text = name;
+            if (age != null && _ageController.text.isEmpty) _ageController.text = age.toString();
+            if (gender != null && _selectedGender.isEmpty) _selectedGender = gender;
+            if (seeking != null && _selectedSeeking.isEmpty) _selectedSeeking = seeking;
+            if (bio != null && _bioController.text.isEmpty) _bioController.text = bio;
+            if (interests != null && _interests.isEmpty) {
+              if (interests is List) {
+                _interests.addAll(List<String>.from(interests));
+              } else if (interests is String) {
+                try { _interests.addAll(List<String>.from(jsonDecode(interests))); } catch (_) {}
+              }
+            }
+            if (lat != null && _latitude == null) {
+              _latitude = (lat as num).toDouble();
+              _longitude = (lon as num).toDouble();
+              _liveLocationEnabled = true;
+              _selectedMarker = Marker(
+                markerId: const MarkerId('selected'),
+                position: LatLng(_latitude!, _longitude!),
+              );
+            }
+            if (locationName != null && _locationName == null) _locationName = locationName;
+          });
+          _saveLocal();
+        }
+      }
+    } catch (_) {}
+  }
+
   Future<void> _fetchDisplayName() async {
+    // This is now handled by _fetchOnboardingProgress, but keeping it for safety or partial use
     try {
       final res = await ApiService.getMe();
       if (res.statusCode == 200) {
@@ -158,15 +306,18 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   bool _canProceed() {
     switch (_currentStep) {
       case 0:
+        final age = int.tryParse(_ageController.text) ?? 0;
         return _nameController.text.trim().isNotEmpty &&
             _ageController.text.trim().isNotEmpty &&
-            int.tryParse(_ageController.text) != null &&
+            age >= 18 &&
             _selectedGender.isNotEmpty;
       case 1:
         return _selectedSeeking.isNotEmpty;
       case 2:
         return _interests.isNotEmpty;
       case 3:
+        return _liveLocationEnabled && _latitude != null && _longitude != null;
+      case 4:
         return _photoItems.length >= 3;
       default:
         return false;
@@ -175,9 +326,13 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   void _nextStep() {
     if (_currentStep < _totalSteps - 1) {
+      _saveLocal();
+      // Partial backend save for each step
+      _saveCurrentStepToBackend();
       setState(() {
         _currentStep++;
       });
+      ApiService.updateOnboardingStep(_currentStep);
       _scrollController.animateTo(
         0,
         duration: const Duration(milliseconds: 300),
@@ -186,18 +341,54 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     }
   }
 
+  Future<void> _saveCurrentStepToBackend() async {
+    try {
+      switch (_currentStep) {
+        case 0:
+          await ApiService.saveProfile({
+            'display_name': _nameController.text.trim(),
+            'age': int.tryParse(_ageController.text) ?? 18,
+            'gender': _selectedGender,
+          });
+          break;
+        case 1:
+          await ApiService.saveProfile({
+            'interested_in': _selectedSeeking,
+            'bio': _bioController.text.trim(),
+          });
+          break;
+        case 2:
+          await ApiService.saveProfile({'interests': _interests});
+          break;
+        case 3:
+          if (_latitude != null && _longitude != null) {
+            await ApiService.saveProfile({
+              'live_location_enabled': true,
+              'latitude': _latitude,
+              'longitude': _longitude,
+              'location_name': _locationName ?? '',
+            });
+          }
+          break;
+      }
+    } catch (_) {}
+  }
+
   void _prevStep() {
     if (_currentStep > 0) {
+      _saveLocal();
       setState(() {
         _currentStep--;
       });
+      ApiService.updateOnboardingStep(_currentStep);
       _scrollController.animateTo(
         0,
         duration: const Duration(milliseconds: 300),
         curve: Curves.easeOutCubic,
       );
     } else {
-      Navigator.of(context).pop();
+      // Step 0: exit app instead of navigating to black screen
+      SystemNavigator.pop();
     }
   }
 
@@ -259,7 +450,144 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   void _removePhoto(int index) {
     setState(() {
       _photoItems.removeAt(index);
+      // After removal, re-enforce that first 3 (indices 0, 1, 2) must be public
+      for (int i = 0; i < _photoItems.length; i++) {
+        if (i < 3) {
+          _photoItems[i].isPrivate = false;
+        }
+      }
     });
+  }
+
+  Future<void> _handleLocationToggle(bool value) async {
+    if (value) {
+      final status = await Permission.location.request();
+      if (status.isGranted) {
+        setState(() => _isLocationLoading = true);
+        try {
+          final position = await Geolocator.getCurrentPosition(
+            desiredAccuracy: LocationAccuracy.high,
+          );
+          
+          final placemarks = await placemarkFromCoordinates(
+            position.latitude,
+            position.longitude,
+          );
+
+          String locName = 'Unknown Location';
+          if (placemarks.isNotEmpty) {
+            final p = placemarks.first;
+            locName = '${p.locality}, ${p.administrativeArea}';
+          }
+
+          setState(() {
+            _latitude = position.latitude;
+            _longitude = position.longitude;
+            _locationName = locName;
+            _liveLocationEnabled = true;
+            _isLocationLoading = false;
+            _selectedMarker = Marker(
+              markerId: const MarkerId('selected'),
+              position: LatLng(position.latitude, position.longitude),
+            );
+          });
+          
+          _mapController?.animateCamera(
+            CameraUpdate.newLatLngZoom(LatLng(position.latitude, position.longitude), 15),
+          );
+        } catch (e) {
+          setState(() => _isLocationLoading = false);
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Failed to get location. Please try again.')),
+            );
+          }
+        }
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Location permission denied')),
+          );
+        }
+      }
+    } else {
+      setState(() {
+        _liveLocationEnabled = false;
+        _latitude = null;
+        _longitude = null;
+        _locationName = null;
+      });
+    }
+  }
+
+  Future<void> _onMapTap(LatLng position) async {
+    setState(() => _isLocationLoading = true);
+    try {
+      final placemarks = await placemarkFromCoordinates(
+        position.latitude,
+        position.longitude,
+      );
+
+      String locName = 'Unknown Location';
+      if (placemarks.isNotEmpty) {
+        final p = placemarks.first;
+        locName = '${p.locality}, ${p.administrativeArea}';
+      }
+
+      setState(() {
+        _latitude = position.latitude;
+        _longitude = position.longitude;
+        _locationName = locName;
+        _liveLocationEnabled = true;
+        _isLocationLoading = false;
+        _selectedMarker = Marker(
+          markerId: const MarkerId('selected'),
+          position: position,
+        );
+      });
+    } catch (e) {
+      setState(() => _isLocationLoading = false);
+    }
+  }
+
+  Future<void> _searchLocation(String query) async {
+    if (query.isEmpty) return;
+    setState(() => _isLocationLoading = true);
+    try {
+      final locations = await locationFromAddress(query);
+      if (locations.isNotEmpty) {
+        final loc = locations.first;
+        final pos = LatLng(loc.latitude, loc.longitude);
+        
+        final placemarks = await placemarkFromCoordinates(loc.latitude, loc.longitude);
+        String locName = query;
+        if (placemarks.isNotEmpty) {
+          final p = placemarks.first;
+          locName = '${p.locality}, ${p.administrativeArea}';
+        }
+
+        setState(() {
+          _latitude = loc.latitude;
+          _longitude = loc.longitude;
+          _locationName = locName;
+          _liveLocationEnabled = true;
+          _isLocationLoading = false;
+          _selectedMarker = Marker(
+            markerId: const MarkerId('selected'),
+            position: pos,
+          );
+        });
+        
+        _mapController?.animateCamera(CameraUpdate.newLatLngZoom(pos, 15));
+      }
+    } catch (e) {
+      setState(() => _isLocationLoading = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Location not found')),
+        );
+      }
+    }
   }
 
   Future<void> _handleSubmit() async {
@@ -288,10 +616,15 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         'bio': _bioController.text.trim(),
         'interests': _interests,
         'photos': photosPayload,
+        'live_location_enabled': _liveLocationEnabled,
+        'latitude': _latitude,
+        'longitude': _longitude,
+        'location_name': _locationName,
       });
 
       if (res.statusCode == 200) {
         await ApiService.saveUserData(true, _nameController.text.trim());
+        await _clearLocal(); // clear cached onboarding data
         if (!mounted) return;
         Navigator.of(context).pushReplacementNamed('/home');
       } else {
@@ -328,11 +661,16 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () => FocusScope.of(context).unfocus(),
-      child: Scaffold(
-        resizeToAvoidBottomInset: true,
-        body: Container(
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _prevStep();
+      },
+      child: GestureDetector(
+        onTap: () => FocusScope.of(context).unfocus(),
+        child: Scaffold(
+          resizeToAvoidBottomInset: true,
+          body: Container(
           decoration: const BoxDecoration(
             gradient: RadialGradient(
               center: Alignment.center,
@@ -406,8 +744,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           ),
         ),
       ),
-    );
-  }
+    ),
+  );
+}
 
   Widget _buildHeader() {
     return Positioned(
@@ -433,6 +772,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: Row(
                   children: [
+                    // Hide back button on step 0
+                    if (_currentStep > 0)
                     GestureDetector(
                       onTap: _prevStep,
                       child: Container(
@@ -450,7 +791,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                           color: AppColors.onSurface,
                         ),
                       ),
-                    ),
+                    )
+                    else
+                      const SizedBox(width: 40),
                     const SizedBox(width: 12),
                     Text(
                       'Delulu',
@@ -512,6 +855,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       case 2:
         return _buildStepInterests();
       case 3:
+        return _buildStepLocation();
+      case 4:
         return _buildStepPhotos();
       default:
         return const SizedBox.shrink();
@@ -536,7 +881,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           ),
           const SizedBox(height: 6),
           Text(
-            'Let others know the basics.',
+            'Tell us your basics. You must be at least 18 years old to join Delulu.',
             style: GoogleFonts.beVietnamPro(
               fontSize: 14,
               height: 1.5,
@@ -857,6 +1202,127 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildStepLocation() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Location Access',
+                style: GoogleFonts.beVietnamPro(
+                  fontSize: 28,
+                  fontWeight: FontWeight.w700,
+                  height: 1.29,
+                  letterSpacing: -0.28,
+                  color: AppColors.onSurface,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Search or tap on map to select your vibe zone.',
+                style: GoogleFonts.beVietnamPro(
+                  fontSize: 14,
+                  height: 1.5,
+                  color: AppColors.onSurfaceVariant.withValues(alpha: 0.7),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 20),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Container(
+            decoration: BoxDecoration(
+              color: AppColors.surfaceContainerHigh.withValues(alpha: 0.2),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: AppColors.outline.withValues(alpha: 0.1)),
+            ),
+            child: TextField(
+              controller: _locationSearchController,
+              onSubmitted: _searchLocation,
+              style: GoogleFonts.inter(color: Colors.white, fontSize: 14),
+              decoration: InputDecoration(
+                hintText: 'Search city or area...',
+                hintStyle: GoogleFonts.inter(color: Colors.white38, fontSize: 14),
+                prefixIcon: const Icon(Icons.search, color: Colors.white38, size: 20),
+                border: InputBorder.none,
+                contentPadding: const EdgeInsets.symmetric(vertical: 14),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 20),
+        SizedBox(
+          height: 400,
+          child: Container(
+            margin: const EdgeInsets.symmetric(horizontal: 20),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(color: AppColors.primary.withValues(alpha: 0.2), width: 2),
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(22),
+              child: Stack(
+                children: [
+                  GoogleMap(
+                    initialCameraPosition: CameraPosition(
+                      target: LatLng(_latitude ?? 0, _longitude ?? 0),
+                      zoom: _latitude != null ? 15 : 2,
+                    ),
+                    onMapCreated: (c) => _mapController = c,
+                    onTap: _onMapTap,
+                    myLocationEnabled: true,
+                    myLocationButtonEnabled: false,
+                    zoomControlsEnabled: false,
+                    markers: _selectedMarker != null ? {_selectedMarker!} : {},
+                    style: '''[{"elementType":"geometry","stylers":[{"color":"#212121"}]},{"elementType":"labels.icon","stylers":[{"visibility":"off"}]},{"elementType":"labels.text.fill","stylers":[{"color":"#757575"}]},{"elementType":"labels.text.stroke","stylers":[{"color":"#212121"}]},{"featureType":"administrative","elementType":"geometry","stylers":[{"color":"#757575"}]},{"featureType":"administrative.country","elementType":"labels.text.fill","stylers":[{"color":"#9e9e9e"}]},{"featureType":"administrative.land_parcel","stylers":[{"visibility":"off"}]},{"featureType":"administrative.locality","elementType":"labels.text.fill","stylers":[{"color":"#bdbdbd"}]},{"featureType":"poi","elementType":"labels.text.fill","stylers":[{"color":"#757575"}]},{"featureType":"poi.park","elementType":"geometry","stylers":[{"color":"#181818"}]},{"featureType":"poi.park","elementType":"labels.text.fill","stylers":[{"color":"#616161"}]},{"featureType":"poi.park","elementType":"labels.text.stroke","stylers":[{"color":"#181818"}]},{"featureType":"road","elementType":"geometry.fill","stylers":[{"color":"#2c2c2c"}]},{"featureType":"road","elementType":"labels.text.fill","stylers":[{"color":"#8a8a8a"}]},{"featureType":"road.arterial","elementType":"geometry","stylers":[{"color":"#373737"}]},{"featureType":"road.highway","elementType":"geometry","stylers":[{"color":"#3c3c3c"}]},{"featureType":"road.highway.controlled_access","elementType":"geometry","stylers":[{"color":"#4e4e4e"}]},{"featureType":"road.local","elementType":"labels.text.fill","stylers":[{"color":"#616161"}]},{"featureType":"transit","elementType":"labels.text.fill","stylers":[{"color":"#757575"}]},{"featureType":"water","elementType":"geometry","stylers":[{"color":"#000000"}]},{"featureType":"water","elementType":"labels.text.fill","stylers":[{"color":"#3d3d3d"}]}]''',
+                  ),
+                  Positioned(
+                    bottom: 16,
+                    right: 16,
+                    child: FloatingActionButton(
+                      onPressed: () => _handleLocationToggle(true),
+                      backgroundColor: AppColors.primary,
+                      child: const Icon(Icons.my_location, color: Colors.black),
+                    ),
+                  ),
+                  if (_isLocationLoading)
+                    Container(
+                      color: Colors.black26,
+                      child: const Center(child: CircularProgressIndicator(color: AppColors.primary)),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        if (_locationName != null)
+          Padding(
+            padding: const EdgeInsets.all(20),
+            child: Row(
+              children: [
+                const Icon(Icons.check_circle, color: AppColors.primary, size: 16),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Selected: $_locationName',
+                    style: GoogleFonts.inter(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ],
+            ),
+          )
+        else
+          const SizedBox(height: 20),
+      ],
     );
   }
 
@@ -1311,15 +1777,16 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   ],
                 ),
               ),
-              Positioned(
-                top: 8,
-                right: 8,
-                child: Icon(
-                  Icons.lock_open,
-                  size: 14,
-                  color: AppColors.outlineVariant.withValues(alpha: 0.4),
+              if (index >= 3)
+                Positioned(
+                  top: 8,
+                  right: 8,
+                  child: Icon(
+                    Icons.lock_open,
+                    size: 14,
+                    color: AppColors.outlineVariant.withValues(alpha: 0.4),
+                  ),
                 ),
-              ),
             ],
           ),
         ),

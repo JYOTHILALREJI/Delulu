@@ -35,6 +35,11 @@ router.put('/profile', authMiddleware, async (req, res) => {
       console.log(`[Onboarding] First photo primary: ${req.body.photos[0]?.is_primary}`);
     }
 
+    // Server-side age validation
+    if (age !== undefined && age !== null && Number(age) < 18) {
+      return res.status(400).json({ error: 'You must be at least 18 years old to use Delulu.' });
+    }
+
     // Validate required fields (only if onboarding for the first time, but here we support partial updates too)
     // For simplicity, we'll keep the required checks if they are provided.
 
@@ -61,7 +66,7 @@ router.put('/profile', authMiddleware, async (req, res) => {
       ) VALUES (
         $17, 
         COALESCE($1, ''), 
-        COALESCE($2, 18), 
+        GREATEST(COALESCE(NULLIF($2::int, 0), 18), 18), 
         COALESCE($3, ''), 
         COALESCE($4, ''), 
         COALESCE($5, ''), 
@@ -79,7 +84,7 @@ router.put('/profile', authMiddleware, async (req, res) => {
       )
       ON CONFLICT (user_id) DO UPDATE SET
         display_name = COALESCE($1, profiles.display_name),
-        age = COALESCE($2, profiles.age),
+        age = GREATEST(COALESCE(NULLIF($2::int, 0), profiles.age), 18),
         bio = COALESCE($3, profiles.bio),
         gender = COALESCE($4, profiles.gender),
         interested_in = COALESCE($5, profiles.interested_in),
@@ -122,9 +127,9 @@ router.put('/profile', authMiddleware, async (req, res) => {
       io.emit('user_status', { userId, status: 'online' });
     }
 
-    // Mark user as onboarded
+    // Mark user as onboarded (at the final submission)
     await db.query(
-      'UPDATE users SET is_onboarded = TRUE WHERE id = $1',
+      'UPDATE users SET is_onboarded = TRUE, onboarding_step = 4 WHERE id = $1',
       [userId]
     );
 
@@ -132,6 +137,18 @@ router.put('/profile', authMiddleware, async (req, res) => {
   } catch (err) {
     console.error('[Onboarding] Save profile error:', err);
     res.status(500).json({ error: 'Internal server error', details: err.message });
+  }
+});
+
+router.put('/step', authMiddleware, async (req, res) => {
+  try {
+    const userId = req.userId;
+    const { step } = req.body;
+    await db.query('UPDATE users SET onboarding_step = $1 WHERE id = $2', [step, userId]);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[Onboarding] Update step error:', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 

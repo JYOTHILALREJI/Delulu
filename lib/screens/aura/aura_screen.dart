@@ -14,6 +14,7 @@ import 'package:geocoding/geocoding.dart';
 import 'dart:math';
 import 'edit_profile_screen.dart';
 import 'blocked_profiles_screen.dart';
+import '../premium/subscription_screen.dart';
 import '../../components/delulu_wavy_loader.dart';
 
 class AuraScreen extends StatefulWidget {
@@ -327,6 +328,8 @@ class AuraScreenState extends State<AuraScreen> {
                     ),
                   ),
                               const SizedBox(height: 16),
+                              _buildRizzPlusBanner(),
+                              const SizedBox(height: 16),
                               _buildEditProfileButton(),
                               const SizedBox(height: 8),
                             ],
@@ -350,7 +353,7 @@ class AuraScreenState extends State<AuraScreen> {
       child: Text(
         'Your Aura',
         style: GoogleFonts.beVietnamPro(
-          fontSize: 32,
+          fontSize: 28,
           fontWeight: FontWeight.w800,
           color: Colors.white,
           letterSpacing: -1,
@@ -391,7 +394,7 @@ class AuraScreenState extends State<AuraScreen> {
         Text(
           value,
           style: GoogleFonts.beVietnamPro(
-            fontSize: 26,
+            fontSize: 22,
             fontWeight: FontWeight.w900,
             color: Colors.white,
           ),
@@ -424,7 +427,7 @@ class AuraScreenState extends State<AuraScreen> {
         Text(
           '$name, $age',
           style: GoogleFonts.beVietnamPro(
-            fontSize: 32,
+            fontSize: 28,
             fontWeight: FontWeight.w800,
             color: Colors.white,
             shadows: [
@@ -542,10 +545,10 @@ class AuraScreenState extends State<AuraScreen> {
                 transitionsBuilder: (context, animation, secondaryAnimation, child) {
                   const begin = Offset(0.0, 1.0);
                   const end = Offset.zero;
-                  const curve = Curves.easeOutCubic;
+                  const curve = Curves.fastLinearToSlowEaseIn;
 
-                  var trait = Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
-                  var offsetAnimation = animation.drive(trait);
+                  var tween = Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
+                  var offsetAnimation = animation.drive(tween);
 
                   return SlideTransition(
                     position: offsetAnimation,
@@ -555,7 +558,8 @@ class AuraScreenState extends State<AuraScreen> {
                     ),
                   );
                 },
-                transitionDuration: const Duration(milliseconds: 500),
+                transitionDuration: const Duration(milliseconds: 600),
+                reverseTransitionDuration: const Duration(milliseconds: 500),
               ),
             ).then((_) {
               loadProfile();
@@ -582,6 +586,78 @@ class AuraScreenState extends State<AuraScreen> {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRizzPlusBanner() {
+    if (_profile?['is_premium'] == true) return const SizedBox.shrink();
+    
+    return Container(
+      width: double.infinity,
+      height: 70,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        gradient: const LinearGradient(
+          colors: [Color(0xFFFFD700), Color(0xFFFFA500)],
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFFFFA500).withOpacity(0.3),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: () async {
+            final result = await Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const SubscriptionScreen()),
+            );
+            if (result == true) {
+              loadProfile();
+            }
+          },
+          borderRadius: BorderRadius.circular(20),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Row(
+              children: [
+                const Icon(Icons.bolt, color: Colors.black, size: 28),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Upgrade to Rizz+',
+                        style: GoogleFonts.beVietnamPro(
+                          fontWeight: FontWeight.w900,
+                          color: Colors.black,
+                          fontSize: 14,
+                        ),
+                      ),
+                      Text(
+                        'Unlimited plays & see who likes you',
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.inter(
+                          color: Colors.black.withOpacity(0.7),
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const Icon(Icons.chevron_right, color: Colors.black),
+              ],
+            ),
+          ),
         ),
       ),
     );

@@ -17,7 +17,14 @@ class SocketService {
   final _typingController = StreamController<Map<String, dynamic>>.broadcast();
   final _statusController = StreamController<Map<String, dynamic>>.broadcast();
   final _attentionController = StreamController<Map<String, dynamic>>.broadcast();
+  final _gameInviteController = StreamController<Map<String, dynamic>>.broadcast();
+  final _gameInviteSentController = StreamController<Map<String, dynamic>>.broadcast();
+  final _gameInviteResponseController = StreamController<Map<String, dynamic>>.broadcast();
+  final _gameCancelledController = StreamController<Map<String, dynamic>>.broadcast();
   final _errorController = StreamController<Map<String, dynamic>>.broadcast();
+
+  Map<String, dynamic>? _lastInviteSent;
+  Map<String, dynamic>? get lastInviteSent => _lastInviteSent;
 
   Stream<Map<String, dynamic>> get messageStream => _messageController.stream;
   Stream<Map<String, dynamic>> get unreadStream => _unreadController.stream;
@@ -25,6 +32,10 @@ class SocketService {
   Stream<Map<String, dynamic>> get typingStream => _typingController.stream;
   Stream<Map<String, dynamic>> get statusStream => _statusController.stream;
   Stream<Map<String, dynamic>> get attentionStream => _attentionController.stream;
+  Stream<Map<String, dynamic>> get gameInviteStream => _gameInviteController.stream;
+  Stream<Map<String, dynamic>> get gameInviteSentStream => _gameInviteSentController.stream;
+  Stream<Map<String, dynamic>> get gameInviteResponseStream => _gameInviteResponseController.stream;
+  Stream<Map<String, dynamic>> get gameCancelledStream => _gameCancelledController.stream;
   Stream<Map<String, dynamic>> get errorStream => _errorController.stream;
 
   bool get connected => _socket?.connected ?? false;
@@ -43,11 +54,46 @@ class SocketService {
     });
   }
 
+  void emitGameInvite(int channelId, String peerId, String gameId, String gameName) {
+    _socket?.emit('game_invite', {
+      'channelId': channelId,
+      'peerId': peerId,
+      'gameId': gameId,
+      'gameName': gameName,
+    });
+  }
+
+  void emitGameInviteResponse(int channelId, String peerId, String gameId, String gameName, String sessionId, bool accepted) {
+    _socket?.emit('game_invite_response', {
+      'channelId': channelId,
+      'peerId': peerId,
+      'gameId': gameId,
+      'gameName': gameName,
+      'sessionId': sessionId,
+      'accepted': accepted,
+    });
+  }
+
+  void emitGameCancel(int channelId, String peerId, String sessionId) {
+    _socket?.emit('game_cancel', {
+      'channelId': channelId,
+      'peerId': peerId,
+      'sessionId': sessionId,
+    });
+  }
+
+  void emitGameSessionUpdate(String sessionId, int duration) {
+    _socket?.emit('game_session_update', {
+      'sessionId': sessionId,
+      'duration': duration,
+    });
+  }
+
   void connect() async {
     if (_socket != null && _socket!.connected) return;
 
     final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('token');
+    final token = prefs.getString('auth_token');
 
     if (token == null) return;
 
@@ -91,6 +137,23 @@ class SocketService {
       _attentionController.add(data);
     });
 
+    _socket!.on('game_invite_received', (data) {
+      _gameInviteController.add(data);
+    });
+
+    _socket!.on('game_invite_sent', (data) {
+      _lastInviteSent = data;
+      _gameInviteSentController.add(data);
+    });
+
+    _socket!.on('game_invite_response_received', (data) {
+      _gameInviteResponseController.add(data);
+    });
+
+    _socket!.on('game_cancelled', (data) {
+      _gameCancelledController.add(data);
+    });
+
     _socket!.on('error_message', (data) {
       _errorController.add(data);
     });
@@ -111,6 +174,10 @@ class SocketService {
     _typingController.close();
     _statusController.close();
     _attentionController.close();
+    _gameInviteController.close();
+    _gameInviteSentController.close();
+    _gameInviteResponseController.close();
+    _gameCancelledController.close();
     _errorController.close();
     disconnect();
   }

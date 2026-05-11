@@ -6,6 +6,7 @@ import 'screens/auth/signup_screen.dart';
 import 'screens/onboarding/onboarding_screen.dart';
 import 'screens/home/home_screen.dart';
 import 'components/verification_prompt_wrapper.dart';
+import 'components/game_invite_wrapper.dart';
 
 import 'package:flutter/services.dart';
 
@@ -34,7 +35,9 @@ class DeluluApp extends StatelessWidget {
         scaffoldBackgroundColor: AppColors.background,
       ),
       builder: (context, child) {
-        return VerificationPromptWrapper(child: child!);
+        return GameInviteGlobalWrapper(
+          child: VerificationPromptWrapper(child: child!),
+        );
       },
       initialRoute: '/',
       onGenerateRoute: (settings) {

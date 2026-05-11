@@ -27,13 +27,14 @@ router.get('/connections', authMiddleware, async (req, res) => {
          p.last_seen_at,
          latest.msg as last_message,
          latest.time as last_message_time,
+         latest.mtype as last_message_type,
          (SELECT COUNT(*)::int FROM messages 
           WHERE channel_id = c.id AND sender_id != $1 AND read_at IS NULL) as unread_count
        FROM channels c
        JOIN users u ON (CASE WHEN c.user1_id = $1 THEN c.user2_id ELSE c.user1_id END) = u.id
        LEFT JOIN profiles p ON p.user_id = u.id
        LEFT JOIN LATERAL (
-         SELECT content as msg, created_at as time
+         SELECT content as msg, created_at as time, message_type as mtype
          FROM messages m
          WHERE m.channel_id = c.id
          ORDER BY m.created_at DESC
@@ -67,7 +68,9 @@ router.get('/connections', authMiddleware, async (req, res) => {
                     is_online: isOnline,
                     last_seen: lastSeen
                 },
-                last_message: row.last_message || null,
+                last_message: row.last_message_type === 'voice' 
+                    ? 'Voice Message 🎤' 
+                    : (row.last_message_type === 'game_status' ? 'Game Activity 🎲' : (row.last_message || null)),
                 last_message_time: row.last_message_time || null,
                 unread_count: row.unread_count || 0
             };
@@ -114,15 +117,20 @@ router.post('/mark-read/:channelId', authMiddleware, async (req, res) => {
         // Emit unread update to the user who marked as read (to refresh their nav bar/list)
         // AND emit to the other user so they see the ticks change
         const io = socketManager.getIo();
-        const channel = await db.query(`SELECT user1_id, user2_id FROM channels WHERE id = $1`, [channelId]);
-        if (channel.rows.length > 0) {
-            const { user1_id, user2_id } = channel.rows[0];
+        const channelRes = await db.query(`SELECT user1_id, user2_id FROM channels WHERE id = $1`, [channelId]);
+        if (channelRes.rows.length > 0) {
+            const { user1_id, user2_id } = channelRes.rows[0];
             const peerId = user1_id === userId ? user2_id : user1_id;
             
             // Notify the marker (me) to refresh counts
             io.to(userId).emit('unread_update', { channelId });
-            // Notify the sender (peer) that their message was read
-            io.to(peerId).emit('message_read', { channelId, readerId: userId });
+
+            // Check if reader (me) has read receipts enabled before notifying sender (peer)
+            const readerRes = await db.query('SELECT read_receipt_enabled FROM profiles WHERE user_id = $1', [userId]);
+            if (readerRes.rows.length > 0 && readerRes.rows[0].read_receipt_enabled !== false) {
+                // Notify the sender (peer) that their message was read
+                io.to(peerId).emit('message_read', { channelId, readerId: userId });
+            }
         }
 
         res.json({ success: true });
@@ -150,25 +158,41 @@ router.get('/messages/:channelId', authMiddleware, async (req, res) => {
             return res.status(403).json({ error: 'Access denied' });
         }
 
-        const messages = await db.query(
-            `SELECT id, sender_id, content, message_type, duration, created_at, read_at
-       FROM messages
-       WHERE channel_id = $1
-       ORDER BY created_at ASC
-       LIMIT 200`,
-            [channelId]
+        const result = await db.query(
+            `SELECT m.id, m.sender_id, m.content, m.message_type, m.duration, m.created_at, m.read_at, m.reply_to_id,
+                    rm.content as reply_to_content,
+                    rm.sender_id as reply_to_sender_id,
+                    rm.message_type as reply_to_message_type,
+                    p_peer.read_receipt_enabled as peer_read_receipt_enabled
+             FROM messages m
+             LEFT JOIN messages rm ON m.reply_to_id = rm.id
+             JOIN profiles p_peer ON (CASE WHEN m.sender_id = $2 THEN (SELECT CASE WHEN user1_id = $2 THEN user2_id ELSE user1_id END FROM channels WHERE id = $1) ELSE m.sender_id END) = p_peer.user_id
+             WHERE m.channel_id = $1
+             ORDER BY m.created_at DESC
+             LIMIT 200`,
+            [channelId, userId]
         );
 
         res.json({
-            messages: messages.rows.map(m => ({
-                id: m.id,
-                sender_id: m.sender_id,
-                content: m.content,
-                message_type: m.message_type,
-                duration: m.duration,
-                created_at: m.created_at,
-                read_at: m.read_at,
-            }))
+            messages: result.rows.reverse().map(m => {
+                const isSentByMe = m.sender_id === userId;
+                // If I sent the message, hide read_at if the peer has disabled receipts
+                const readAt = (isSentByMe && m.peer_read_receipt_enabled === false) ? null : m.read_at;
+                
+                return {
+                    id: m.id,
+                    sender_id: m.sender_id,
+                    content: m.content,
+                    message_type: m.message_type,
+                    duration: m.duration,
+                    created_at: m.created_at,
+                    read_at: readAt,
+                    reply_to_id: m.reply_to_id,
+                    reply_to_content: m.reply_to_content,
+                    reply_to_sender_id: m.reply_to_sender_id,
+                    reply_to_message_type: m.reply_to_message_type
+                };
+            })
         });
     } catch (err) {
         console.error('Get messages error:', err);
@@ -180,7 +204,7 @@ router.get('/messages/:channelId', authMiddleware, async (req, res) => {
 router.post('/send', authMiddleware, async (req, res) => {
     try {
         const senderId = req.userId;
-        const { channelId, content, message_type, duration } = req.body;
+        const { channelId, content, message_type, duration, reply_to_id } = req.body;
 
         if (!channelId || !content || content.trim().length === 0) {
             return res.status(400).json({ error: 'channelId and content required' });
@@ -213,11 +237,27 @@ router.post('/send', authMiddleware, async (req, res) => {
         }
 
         const result = await db.query(
-            `INSERT INTO messages (channel_id, sender_id, content, message_type, duration)
-       VALUES ($1, $2, $3, $4, $5)
-       RETURNING id, created_at`,
-            [channelId, senderId, content.trim(), message_type || 'text', duration || null]
+            `INSERT INTO messages (channel_id, sender_id, content, message_type, duration, reply_to_id)
+             VALUES ($1, $2, $3, $4, $5, $6)
+             RETURNING id, created_at`,
+            [channelId, senderId, content.trim(), message_type || 'text', duration || null, reply_to_id || null]
         );
+
+        // Fetch reply context for broadcast if it exists
+        let replyContext = null;
+        if (reply_to_id) {
+            const replyMsg = await db.query(
+                'SELECT content, sender_id, message_type FROM messages WHERE id = $1',
+                [reply_to_id]
+            );
+            if (replyMsg.rows.length > 0) {
+                replyContext = {
+                    content: replyMsg.rows[0].content,
+                    sender_id: replyMsg.rows[0].sender_id,
+                    message_type: replyMsg.rows[0].message_type
+                };
+            }
+        }
 
         const message = {
             id: result.rows[0].id,
@@ -226,7 +266,11 @@ router.post('/send', authMiddleware, async (req, res) => {
             message_type: message_type || 'text',
             duration: duration || null,
             created_at: result.rows[0].created_at,
-            channel_id: channelId
+            channel_id: channelId,
+            reply_to_id: reply_to_id || null,
+            reply_to_content: replyContext?.content,
+            reply_to_sender_id: replyContext?.sender_id,
+            reply_to_message_type: replyContext?.message_type
         };
 
         // Emit to peer
@@ -234,6 +278,77 @@ router.post('/send', authMiddleware, async (req, res) => {
         io.to(peerId).emit('new_message', message);
         // Also notify me to update my list preview/sorting
         io.to(senderId).emit('new_message', message);
+
+        // ── Streak Logic ──
+        try {
+            // Find or create streak record
+            const streakRes = await db.query(
+                `SELECT id, count, last_message_at 
+                 FROM streaks 
+                 WHERE (user1_id = $1 AND user2_id = $2) 
+                    OR (user1_id = $2 AND user2_id = $1)`,
+                [senderId, peerId]
+            );
+
+            let newCount = 1;
+            if (streakRes.rows.length > 0) {
+                const streak = streakRes.rows[0];
+                const lastMsgAt = new Date(streak.last_message_at);
+                const now = new Date();
+                
+                // Check if last message was today (ignore) or yesterday (increment) or older (reset)
+                const diffDays = Math.floor((now - lastMsgAt) / (1000 * 60 * 60 * 24));
+                
+                if (diffDays === 1) {
+                    newCount = streak.count + 1;
+                } else if (diffDays === 0) {
+                    newCount = streak.count; // No change if multiple messages same day
+                } else {
+                    newCount = 1; // Reset if more than 1 day gap
+                }
+
+                await db.query(
+                    'UPDATE streaks SET count = $1, last_message_at = NOW() WHERE id = $2',
+                    [newCount, streak.id]
+                );
+            } else {
+                await db.query(
+                    'INSERT INTO streaks (user1_id, user2_id, count, last_message_at) VALUES ($1, $2, 1, NOW())',
+                    [senderId, peerId]
+                );
+            }
+
+            // Update user's overall streak count and popularity score
+            const updateStreakCount = async (uid) => {
+                const sumRes = await db.query(
+                    'SELECT SUM(count)::int as total FROM streaks WHERE user1_id = $1 OR user2_id = $1',
+                    [uid]
+                );
+                const totalStreaks = sumRes.rows[0].total || 0;
+                await db.query('UPDATE profiles SET streak_count = $1 WHERE user_id = $2', [totalStreaks, uid]);
+                
+                // Trigger popularity update (we can import it or just do it here)
+                await db.query(`
+                    UPDATE profiles 
+                    SET popularity_score = (
+                      (likes_count * 2) + 
+                      (streak_count * 5) + 
+                      (CASE 
+                        WHEN last_seen_at >= NOW() - INTERVAL '1 day' THEN 10
+                        WHEN last_seen_at >= NOW() - INTERVAL '3 days' THEN 5
+                        ELSE 0
+                       END)
+                    )
+                    WHERE user_id = $1
+                `, [uid]);
+            };
+
+            await updateStreakCount(senderId);
+            await updateStreakCount(peerId);
+
+        } catch (err) {
+            console.error('Streak update error:', err);
+        }
 
         res.json({ message });
     } catch (err) {

@@ -6,12 +6,14 @@ class DeluluNavBar extends StatefulWidget {
   final int currentIndex;
   final ValueChanged<int> onTap;
   final int whisperUnreadCount;
+  final int pingsUnreadCount;
 
   const DeluluNavBar({
     super.key,
     required this.currentIndex,
     required this.onTap,
     this.whisperUnreadCount = 0,
+    this.pingsUnreadCount = 0,
   });
 
   @override
@@ -160,14 +162,14 @@ class _DeluluNavBarState extends State<DeluluNavBar> {
                                       ? AppColors.primary
                                       : AppColors.onSurfaceVariant.withValues(alpha: 0.5),
                                 ),
-                                if (index == 3 && widget.whisperUnreadCount > 0)
+                                if ((index == 3 && widget.whisperUnreadCount > 0) || (index == 2 && widget.pingsUnreadCount > 0))
                                   Positioned(
                                     right: -8,
                                     top: -8,
                                     child: Container(
                                       padding: const EdgeInsets.all(4),
                                       decoration: const BoxDecoration(
-                                        color: AppColors.primaryContainer,
+                                        color: Colors.purple, // Requested purple circle
                                         shape: BoxShape.circle,
                                       ),
                                       constraints: const BoxConstraints(
@@ -175,10 +177,10 @@ class _DeluluNavBarState extends State<DeluluNavBar> {
                                         minHeight: 16,
                                       ),
                                       child: Text(
-                                        '${widget.whisperUnreadCount > 9 ? '9+' : widget.whisperUnreadCount}',
+                                        '${(index == 3 ? widget.whisperUnreadCount : widget.pingsUnreadCount) > 9 ? '9+' : (index == 3 ? widget.whisperUnreadCount : widget.pingsUnreadCount)}',
                                         style: const TextStyle(
                                           color: Colors.white,
-                                          fontSize: 9,
+                                          fontSize: 8,
                                           fontWeight: FontWeight.bold,
                                         ),
                                         textAlign: TextAlign.center,

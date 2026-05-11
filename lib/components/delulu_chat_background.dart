@@ -19,10 +19,16 @@ class DeluluChatBackground extends StatelessWidget {
   }
 
   Widget _buildStatic(BuildContext context) {
+    final screenSize = MediaQuery.of(context).size;
     return Stack(
       children: [
         Container(color: const Color(0xFF2A2B2E)),
-        Positioned.fill(
+        // Fixed size background that doesn't jump on keyboard resize
+        Positioned(
+          top: 0,
+          left: 0,
+          width: screenSize.width,
+          height: screenSize.height,
           child: RepaintBoundary(
             child: CustomPaint(
               painter: _DeluluPainter(),
@@ -52,7 +58,7 @@ class _DeluluPainter extends CustomPainter {
           text: 'Delulu',
           style: GoogleFonts.outfit(
             fontSize: fontSize,
-            color: AppColors.primary.withValues(alpha: opacity),
+            color: AppColors.primary.withOpacity(opacity),
             fontWeight: FontWeight.w600,
           ),
         ),
@@ -72,7 +78,7 @@ class _DeluluPainter extends CustomPainter {
     for (int i = 0; i < 40; i++) {
       final hSize = 10.0 + _random.nextDouble() * 25.0;
       final opacity = 0.03 + _random.nextDouble() * 0.07;
-      final heartPaint = Paint()..color = AppColors.primary.withValues(alpha: opacity);
+      final heartPaint = Paint()..color = AppColors.primary.withOpacity(opacity);
       
       canvas.save();
       final x = _random.nextDouble() * size.width;

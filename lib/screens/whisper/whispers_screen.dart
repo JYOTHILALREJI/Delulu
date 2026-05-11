@@ -124,36 +124,10 @@ class WhispersScreenState extends State<WhispersScreen> {
 
   @override
   Widget build(BuildContext context) {
-    if (_isLoading) {
-      return const Center(child: DeluluWavyLoader());
-    }
-
-    if (_connections.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.mark_unread_chat_alt_outlined, size: 48,
-                color: AppColors.onSurfaceVariant.withValues(alpha: 0.3)),
-            const SizedBox(height: 16),
-            Text(
-              'No Whispers yet',
-              style: GoogleFonts.beVietnamPro(fontSize: 16, color: AppColors.onSurfaceVariant),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Make connections to start chatting!',
-              style: GoogleFonts.beVietnamPro(fontSize: 14, color: AppColors.outline.withValues(alpha: 0.6)),
-            ),
-          ],
-        ),
-      );
-    }
-
     return SafeArea(
       child: Column(
         children: [
-          // Header
+          // Header - Always show
           Padding(
             padding: const EdgeInsets.only(top: 16, left: 20, right: 20, bottom: 8),
             child: Row(
@@ -168,125 +142,151 @@ class WhispersScreenState extends State<WhispersScreen> {
             ),
           ),
           Expanded(
-            child: RefreshIndicator(
-              onRefresh: fetchConnections,
-              color: AppColors.primary,
-              child: ListView.builder(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                itemCount: _connections.length,
-                itemBuilder: (context, index) {
-                  final conn = _connections[index];
-                  final profile = conn['profile'] as Map<String, dynamic>;
-                  final photos = List<Map<String, dynamic>>.from(profile['photos'] ?? []);
-                  final primaryPhoto = photos.isNotEmpty 
-                      ? photos.firstWhere((p) => p['is_primary'] == true, orElse: () => photos[0])
-                      : null;
-                  final avatarUrl = primaryPhoto?['url'];
-                  final lastMsg = conn['last_message'] as String?;
-                  final lastTime = conn['last_message_time'] as String?;
+            child: _isLoading 
+                ? const Center(child: DeluluWavyLoader())
+                : _connections.isEmpty
+                    ? _buildEmptyState()
+                    : RefreshIndicator(
+                        onRefresh: fetchConnections,
+                        color: AppColors.primary,
+                        child: ListView.builder(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                          itemCount: _connections.length,
+                          itemBuilder: (context, index) {
+                            final conn = _connections[index];
+                            final profile = conn['profile'] as Map<String, dynamic>;
+                            final photos = List<Map<String, dynamic>>.from(profile['photos'] ?? []);
+                            final primaryPhoto = photos.isNotEmpty 
+                                ? photos.firstWhere((p) => p['is_primary'] == true, orElse: () => photos[0])
+                                : null;
+                            final avatarUrl = primaryPhoto?['url'];
+                            final lastMsg = conn['last_message'] as String?;
+                            final lastTime = conn['last_message_time'] as String?;
 
-                  return Container(
-                    margin: const EdgeInsets.only(bottom: 12),
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: AppColors.primary.withValues(alpha: 0.15), width: 1),
-                      color: Colors.white.withValues(alpha: 0.02),
-                    ),
-                    child: ListTile(
-                      contentPadding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-                      leading: Stack(
-                        children: [
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(20),
-                            child: Container(
-                              width: 50, height: 50,
-                              color: AppColors.surfaceContainerHigh,
-                              child: avatarUrl != null && avatarUrl.isNotEmpty
-                                  ? Image(image: _avatarCache[avatarUrl]!, fit: BoxFit.cover)
-                                  : const Icon(Icons.person, color: AppColors.outlineVariant),
-                            ),
-                          ),
-                          if (_onlineUsers.contains(profile['id']))
-                            Positioned(
-                              right: 2,
-                              bottom: 2,
-                              child: Container(
-                                width: 12,
-                                height: 12,
-                                decoration: BoxDecoration(
-                                  color: Colors.green,
-                                  shape: BoxShape.circle,
-                                  border: Border.all(color: Colors.black, width: 2),
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
-                      title: Text(
-                        '${profile['display_name']}, ${profile['age']}',
-                        style: GoogleFonts.beVietnamPro(fontSize: 16, fontWeight: FontWeight.w600, color: AppColors.onSurface),
-                      ),
-                      subtitle: _typingChannels[conn['channel_id']] == true
-                          ? Text(
-                              'Typing...',
-                              style: GoogleFonts.inter(
-                                fontSize: 13,
-                                color: AppColors.primary,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            )
-                          : (lastMsg != null
-                              ? Text(
-                                  lastMsg,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: GoogleFonts.inter(
-                                      fontSize: 13, color: AppColors.onSurfaceVariant.withValues(alpha: 0.7)),
-                                )
-                              : null),
-                      trailing: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          if (lastTime != null)
-                            Text(
-                              _formatTime(lastTime),
-                              style: GoogleFonts.inter(fontSize: 12, color: AppColors.outline.withValues(alpha: 0.6)),
-                            ),
-                          if ((conn['unread_count'] ?? 0) > 0) ...[
-                            const SizedBox(height: 4),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            return Container(
+                              margin: const EdgeInsets.only(bottom: 12),
                               decoration: BoxDecoration(
-                                color: AppColors.primaryContainer,
-                                borderRadius: BorderRadius.circular(12),
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(color: AppColors.primary.withValues(alpha: 0.15), width: 1),
+                                color: Colors.white.withValues(alpha: 0.02),
                               ),
-                              child: Text(
-                                conn['unread_count'].toString(),
-                                style: GoogleFonts.inter(
-                                    fontSize: 10, fontWeight: FontWeight.w700, color: Colors.white),
+                              child: ListTile(
+                                contentPadding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+                                leading: Stack(
+                                  children: [
+                                    ClipRRect(
+                                      borderRadius: BorderRadius.circular(20),
+                                      child: Container(
+                                        width: 50, height: 50,
+                                        color: AppColors.surfaceContainerHigh,
+                                        child: avatarUrl != null && avatarUrl.isNotEmpty
+                                            ? Image(image: _avatarCache[avatarUrl]!, fit: BoxFit.cover)
+                                            : const Icon(Icons.person, color: AppColors.outlineVariant),
+                                      ),
+                                    ),
+                                    if (_onlineUsers.contains(profile['id'].toString()))
+                                      Positioned(
+                                        right: 2,
+                                        bottom: 2,
+                                        child: Container(
+                                          width: 12,
+                                          height: 12,
+                                          decoration: BoxDecoration(
+                                            color: Colors.green,
+                                            shape: BoxShape.circle,
+                                            border: Border.all(color: Colors.black, width: 2),
+                                          ),
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                                title: Text(
+                                  '${profile['display_name']}, ${profile['age']}',
+                                  style: GoogleFonts.beVietnamPro(fontSize: 16, fontWeight: FontWeight.w600, color: AppColors.onSurface),
+                                ),
+                                subtitle: _typingChannels[conn['channel_id']] == true
+                                    ? Text(
+                                        'Typing...',
+                                        style: GoogleFonts.inter(
+                                          fontSize: 13,
+                                          color: AppColors.primary,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      )
+                                    : (lastMsg != null
+                                        ? Text(
+                                            lastMsg,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: GoogleFonts.inter(
+                                                fontSize: 13, color: AppColors.onSurfaceVariant.withValues(alpha: 0.7)),
+                                          )
+                                        : null),
+                                trailing: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  crossAxisAlignment: CrossAxisAlignment.end,
+                                  children: [
+                                    if (lastTime != null)
+                                      Text(
+                                        _formatTime(lastTime),
+                                        style: GoogleFonts.inter(fontSize: 12, color: AppColors.outline.withValues(alpha: 0.6)),
+                                      ),
+                                    if ((conn['unread_count'] ?? 0) > 0) ...[
+                                      const SizedBox(height: 4),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                        decoration: BoxDecoration(
+                                          color: AppColors.primaryContainer,
+                                          borderRadius: BorderRadius.circular(12),
+                                        ),
+                                        child: Text(
+                                          conn['unread_count'].toString(),
+                                          style: GoogleFonts.inter(
+                                              fontSize: 10, fontWeight: FontWeight.w700, color: Colors.white),
+                                        ),
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                                onTap: () {
+                                  Navigator.push(context, MaterialPageRoute(
+                                    builder: (_) => ChatScreen(
+                                      channelId: conn['channel_id'],
+                                      peerId: profile['id'].toString(),
+                                      peerName: '${profile['display_name']}, ${profile['age']}',
+                                      peerImageUrl: avatarUrl,
+                                      lastSeen: profile['last_seen'],
+                                      isOnline: _onlineUsers.contains(profile['id'].toString()),
+                                    ),
+                                  )).then((_) => fetchConnections()); // refresh on return
+                                },
                               ),
-                            ),
-                          ],
-                        ],
+                            );
+                          },
+                        ),
                       ),
-                      onTap: () {
-                        Navigator.push(context, MaterialPageRoute(
-                          builder: (_) => ChatScreen(
-                            channelId: conn['channel_id'],
-                            peerId: profile['id'],
-                            peerName: '${profile['display_name']}, ${profile['age']}',
-                            peerImageUrl: avatarUrl,
-                            lastSeen: profile['last_seen'],
-                            isOnline: _onlineUsers.contains(profile['id'].toString()),
-                          ),
-                        )).then((_) => fetchConnections()); // refresh on return
-                      },
-                    ),
-                  );
-                },
-              ),
-            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEmptyState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.mark_unread_chat_alt_outlined, size: 48,
+              color: AppColors.onSurfaceVariant.withValues(alpha: 0.3)),
+          const SizedBox(height: 16),
+          Text(
+            'No Whispers yet',
+            style: GoogleFonts.beVietnamPro(fontSize: 16, color: AppColors.onSurfaceVariant),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Make connections to start chatting!',
+            style: GoogleFonts.beVietnamPro(fontSize: 14, color: AppColors.outline.withValues(alpha: 0.6)),
           ),
         ],
       ),

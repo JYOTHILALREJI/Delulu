@@ -13,6 +13,9 @@ import 'package:geocoding/geocoding.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'dart:math';
 import '../../components/delulu_wavy_loader.dart';
+import '../premium/subscription_screen.dart';
+import '../discovery/location_picker_screen.dart';
+
 
 class EditProfileScreen extends StatefulWidget {
   final Map<String, dynamic> profile;
@@ -39,7 +42,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   late bool _lastSeenEnabled;
   late bool _readReceiptEnabled;
   late bool _liveLocationEnabled;
+  late bool _e2eEnabled;
+  late bool _hideLocationEnabled;
   late bool _isVerified;
+  bool _isPremium = false;
   String _appVersion = '';
   
   bool _isLoading = false;
@@ -74,9 +80,55 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     _lastSeenEnabled = p['last_seen_enabled'] ?? true;
     _readReceiptEnabled = p['read_receipt_enabled'] ?? true;
     _liveLocationEnabled = p['live_location_enabled'] ?? false;
+    _e2eEnabled = p['e2e_encryption_enabled'] ?? false;
+    _hideLocationEnabled = p['hide_location_enabled'] ?? false;
     _isVerified = p['is_verified'] ?? false;
     
+    _checkPremiumStatus();
     _loadAppVersion();
+  }
+
+  Future<void> _checkPremiumStatus() async {
+    try {
+      final res = await ApiService.getMe();
+      if (res.statusCode == 200) {
+        final userData = jsonDecode(res.body);
+        final isPremium = userData['is_premium'] == true;
+        
+        setState(() {
+          _isPremium = isPremium;
+          // If premium expired, reset premium-only settings locally
+          if (!isPremium) {
+            _onlineEnabled = true;
+            _typingEnabled = true;
+            _lastSeenEnabled = true;
+            _readReceiptEnabled = true;
+            _e2eEnabled = false;
+            _hideLocationEnabled = false;
+          } else {
+             // Ensure local state matches DB if premium
+            _e2eEnabled = userData['e2e_encryption_enabled'] ?? false;
+            _hideLocationEnabled = userData['hide_location_enabled'] ?? false;
+            _onlineEnabled = userData['online_status_enabled'] ?? true;
+            _typingEnabled = userData['typing_indicator_enabled'] ?? true;
+            _lastSeenEnabled = userData['last_seen_enabled'] ?? true;
+            _readReceiptEnabled = userData['read_receipt_enabled'] ?? true;
+          }
+        });
+
+        // If premium expired, sync reset to backend
+        if (!isPremium && (userData['e2e_encryption_enabled'] == true || userData['hide_location_enabled'] == true)) {
+           await ApiService.saveProfile({
+             'e2e_encryption_enabled': false,
+             'hide_location_enabled': false,
+             'online_status_enabled': true,
+             'typing_indicator_enabled': true,
+             'last_seen_enabled': true,
+             'read_receipt_enabled': true,
+           });
+        }
+      }
+    } catch (_) {}
   }
 
   Future<void> _loadAppVersion() async {
@@ -157,6 +209,21 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   }
 
   Future<void> _updateSetting(String key, dynamic value) async {
+    // Premium gatekeeping check
+    final premiumKeys = [
+      'online_status_enabled', 
+      'typing_indicator_enabled', 
+      'last_seen_enabled', 
+      'read_receipt_enabled',
+      'e2e_encryption_enabled',
+      'hide_location_enabled'
+    ];
+    
+    if (premiumKeys.contains(key) && !_isPremium) {
+      _showPremiumPrompt();
+      return;
+    }
+
     // Optimistic UI
     setState(() {
       if (key == 'online_status_enabled') _onlineEnabled = value;
@@ -164,18 +231,69 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       if (key == 'last_seen_enabled') _lastSeenEnabled = value;
       if (key == 'read_receipt_enabled') _readReceiptEnabled = value;
       if (key == 'live_location_enabled') _liveLocationEnabled = value;
+      if (key == 'e2e_encryption_enabled') _e2eEnabled = value;
+      if (key == 'hide_location_enabled') _hideLocationEnabled = value;
       if (key == 'is_verified') _isVerified = value;
     });
 
     try {
       await ApiService.saveProfile({key: value});
     } catch (e) {
-      // Revert if failed (minimal approach here)
+      // Revert if failed
       setState(() {
         if (key == 'online_status_enabled') _onlineEnabled = !value;
-        // ... could revert others too
+        if (key == 'typing_indicator_enabled') _typingEnabled = !value;
+        if (key == 'last_seen_enabled') _lastSeenEnabled = !value;
+        if (key == 'read_receipt_enabled') _readReceiptEnabled = !value;
+        if (key == 'e2e_encryption_enabled') _e2eEnabled = !value;
+        if (key == 'hide_location_enabled') _hideLocationEnabled = !value;
+        if (key == 'live_location_enabled') _liveLocationEnabled = !value;
       });
     }
+  }
+
+  void _showPremiumPrompt() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppColors.surfaceContainerHigh,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        title: Row(
+          children: [
+            const Icon(Icons.star, color: Color(0xFF8B5CF6)),
+            const SizedBox(width: 12),
+            Text(
+              'Rizz+ Feature',
+              style: GoogleFonts.beVietnamPro(fontWeight: FontWeight.w700, color: Colors.white),
+            ),
+          ],
+        ),
+        content: Text(
+          'Gatekeeping settings are exclusive to Rizz+ members. Upgrade now to take full control of your privacy!',
+          style: GoogleFonts.inter(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('LATER', style: GoogleFonts.inter(color: Colors.white54, fontWeight: FontWeight.bold)),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const SubscriptionScreen()),
+              ).then((_) => _checkPremiumStatus());
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF8B5CF6),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            child: Text('GET RIZZ+', style: GoogleFonts.inter(color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _handleLocationToggle(bool value) async {
@@ -605,12 +723,30 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 trailingText: '••••••••',
                 onTap: _showChangePasswordDialog,
               ),
-              const SizedBox(height: 32),
-              
-              _buildSectionHeader('BASICS'),
               _buildTextField('Display Name', _nameController, 'Your Name'),
               _buildTextField('Age', _ageController, 'Your Age', keyboardType: TextInputType.number),
               const SizedBox(height: 24),
+              
+              if (widget.profile['latitude'] == null) ...[
+                _buildSectionHeader('LOCATION'),
+                _buildSettingsNavTile(
+                  icon: Icons.location_on_outlined,
+                  label: 'Add Your Location',
+                  subtitle: 'Required for discovery and match-making.',
+                  onTap: () async {
+                    final result = await Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const LocationPickerScreen()),
+                    );
+                    if (result == true) {
+                      // Reload profile to reflect new location status
+                      _checkPremiumStatus(); // This refreshes userData
+                    }
+                  },
+                ),
+                const SizedBox(height: 32),
+              ],
+
               _buildLabel('Gender'),
               const SizedBox(height: 12),
               _buildGenderSelector(),
@@ -655,80 +791,45 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 label: 'Online Status',
                 value: _onlineEnabled,
                 onChanged: (v) => _updateSetting('online_status_enabled', v),
+                isPremium: true,
               ),
               _buildToggleTile(
                 icon: Icons.keyboard,
                 label: 'Typing Indicator',
                 value: _typingEnabled,
                 onChanged: (v) => _updateSetting('typing_indicator_enabled', v),
+                isPremium: true,
               ),
               _buildToggleTile(
                 icon: Icons.access_time,
                 label: 'Last Seen',
                 value: _lastSeenEnabled,
                 onChanged: (v) => _updateSetting('last_seen_enabled', v),
+                isPremium: true,
               ),
               _buildToggleTile(
                 icon: Icons.done_all,
                 label: 'Read Receipts',
                 value: _readReceiptEnabled,
                 onChanged: (v) => _updateSetting('read_receipt_enabled', v),
+                isPremium: true,
               ),
               _buildToggleTile(
-                icon: Icons.near_me,
-                label: 'Share Location',
-                subtitle: 'Share your location to meet a real Delulu!',
-                value: _liveLocationEnabled,
-                onChanged: _handleLocationToggle,
+                icon: Icons.security,
+                label: 'E2E Encryption',
+                subtitle: 'Secure your conversations from end-to-end.',
+                value: _e2eEnabled,
+                onChanged: (v) => _updateSetting('e2e_encryption_enabled', v),
+                isPremium: true,
               ),
-              if (_liveLocationEnabled && widget.profile['latitude'] != null)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-                  child: Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: AppColors.primary.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: AppColors.primary.withValues(alpha: 0.2)),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.my_location, size: 14, color: AppColors.primary),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Visible Location: ${widget.profile['location_name'] ?? 'Finding...'}',
-                                style: GoogleFonts.inter(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w700,
-                                  color: AppColors.primary,
-                                ),
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                '${widget.profile['latitude']}, ${widget.profile['longitude']}',
-                                style: GoogleFonts.inter(
-                                  fontSize: 10,
-                                  color: AppColors.primary.withValues(alpha: 0.7),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.refresh, size: 18, color: AppColors.primary),
-                          onPressed: () => _handleLocationToggle(true),
-                          tooltip: 'Update Location',
-                          constraints: const BoxConstraints(),
-                          padding: EdgeInsets.zero,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
+              _buildToggleTile(
+                icon: Icons.location_off,
+                label: 'Hide Location',
+                subtitle: 'Invisible mode for your precise location.',
+                value: _hideLocationEnabled,
+                onChanged: (v) => _updateSetting('hide_location_enabled', v),
+                isPremium: true,
+              ),
               const SizedBox(height: 32),
 
               _buildSectionHeader('PORTFOLIO'),
@@ -918,15 +1019,27 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     String? subtitle,
     required bool value,
     required Function(bool) onChanged,
+    bool isPremium = false,
   }) {
+    final bool showLock = isPremium && !_isPremium;
+    
     return ListTile(
-      leading: Icon(icon, color: AppColors.primary),
-      title: Text(label, style: GoogleFonts.beVietnamPro(fontSize: 15, fontWeight: FontWeight.w600, color: Colors.white)),
+      leading: Icon(icon, color: showLock ? Colors.white24 : AppColors.primary),
+      title: Row(
+        children: [
+          Text(label, style: GoogleFonts.beVietnamPro(fontSize: 15, fontWeight: FontWeight.w600, color: showLock ? Colors.white38 : Colors.white)),
+          if (showLock) ...[
+            const SizedBox(width: 8),
+            const Icon(Icons.star, color: Color(0xFF8B5CF6), size: 14),
+          ],
+        ],
+      ),
       subtitle: subtitle != null ? Text(subtitle, style: GoogleFonts.inter(fontSize: 11, color: AppColors.onSurfaceVariant.withValues(alpha: 0.8))) : null,
       trailing: Switch(
         value: value,
         onChanged: onChanged,
         activeColor: AppColors.primary,
+        inactiveTrackColor: showLock ? Colors.white10 : null,
       ),
     );
   }

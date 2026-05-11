@@ -2,9 +2,11 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'dart:ui';
 import '../../../theme/app_colors.dart';
 import '../../../services/api_service.dart';
 import '../aura/public_aura_screen.dart';
+import '../premium/subscription_screen.dart';
 import '../../components/delulu_wavy_loader.dart';
 
 class SignalsScreen extends StatefulWidget {
@@ -18,11 +20,27 @@ class SignalsScreenState extends State<SignalsScreen> {
   List<Map<String, dynamic>> _profiles = [];
   bool _isLoading = true;
   int _selectedCategory = 0; // 0: Main Vibes (Outgoing), 1: The Vault (Incoming)
+  bool _isPremium = false;
 
   @override
   void initState() {
     super.initState();
     fetchData();
+    _checkPremiumStatus();
+  }
+
+  Future<void> _checkPremiumStatus() async {
+    try {
+      final res = await ApiService.getMe();
+      if (res.statusCode == 200) {
+        final body = jsonDecode(res.body);
+        if (mounted) {
+          setState(() {
+            _isPremium = body['user']['is_premium'] ?? false;
+          });
+        }
+      }
+    } catch (_) {}
   }
 
   Future<void> fetchData() async {
@@ -143,24 +161,30 @@ class SignalsScreenState extends State<SignalsScreen> {
           ),
           _buildToggle(),
           Expanded(
-            child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 400),
-              child: _isLoading
-                ? const Center(key: ValueKey('loading'), child: DeluluWavyLoader())
-                : (sortedProfiles.isEmpty
-                    ? _buildEmptyState()
-                    : RefreshIndicator(
-                        key: ValueKey('list_$_selectedCategory'),
-                        onRefresh: fetchData,
-                        color: AppColors.primary,
-                        child: ListView.builder(
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                          itemCount: sortedProfiles.length,
-                          itemBuilder: (context, index) {
-                            return _buildProfileCard(sortedProfiles[index]);
-                          },
-                        ),
-                      )),
+            child: Stack(
+              children: [
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 400),
+                  child: _isLoading
+                    ? const Center(key: ValueKey('loading'), child: DeluluWavyLoader())
+                    : (sortedProfiles.isEmpty
+                        ? _buildEmptyState()
+                        : RefreshIndicator(
+                            key: ValueKey('list_$_selectedCategory'),
+                            onRefresh: fetchData,
+                            color: AppColors.primary,
+                            child: ListView.builder(
+                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                              itemCount: sortedProfiles.length,
+                              itemBuilder: (context, index) {
+                                return _buildProfileCard(sortedProfiles[index]);
+                              },
+                            ),
+                          )),
+                ),
+                if (_selectedCategory == 1 && !_isPremium)
+                  _buildVaultLockOverlay(),
+              ],
             ),
           ),
         ],
@@ -496,6 +520,105 @@ class SignalsScreenState extends State<SignalsScreen> {
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildVaultLockOverlay() {
+    return Positioned.fill(
+      child: ClipRect(
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
+          child: Container(
+            color: Colors.black.withOpacity(0.6),
+            child: Center(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 40),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(20),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.05),
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white.withOpacity(0.1)),
+                      ),
+                      child: const Icon(Icons.lock_person_outlined, color: Color(0xFFFFD700), size: 40),
+                    ),
+                    const SizedBox(height: 24),
+                    Text(
+                      'The Vault is Locked',
+                      style: GoogleFonts.beVietnamPro(
+                        fontSize: 22,
+                        fontWeight: FontWeight.w800,
+                        color: Colors.white,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      'Upgrade to Rizz+ to see who liked your profile and connect instantly.',
+                      textAlign: TextAlign.center,
+                      style: GoogleFonts.inter(
+                        fontSize: 14,
+                        color: Colors.white.withOpacity(0.7),
+                        height: 1.5,
+                      ),
+                    ),
+                    const SizedBox(height: 32),
+                    _buildUpgradeButton(),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildUpgradeButton() {
+    return GestureDetector(
+      onTap: () async {
+        final result = await Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const SubscriptionScreen()),
+        );
+        if (result == true) {
+          _checkPremiumStatus();
+        }
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            colors: [Color(0xFFFFD700), Color(0xFFFFA500)],
+          ),
+          borderRadius: BorderRadius.circular(30),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFFFFA500).withOpacity(0.4),
+              blurRadius: 20,
+              offset: const Offset(0, 8),
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.bolt, color: Colors.black, size: 22),
+            const SizedBox(width: 8),
+            Text(
+              'GET RIZZ+',
+              style: GoogleFonts.outfit(
+                fontSize: 16,
+                fontWeight: FontWeight.w900,
+                color: Colors.black,
+                letterSpacing: 1,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 

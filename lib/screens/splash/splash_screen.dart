@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'dart:math' as math;
 import 'dart:ui';
 import 'package:flutter/material.dart';
@@ -67,7 +68,7 @@ class _SplashScreenState extends State<SplashScreen>
     if (token != null) {
       try {
         final res = await ApiService.getMe();
-        final body = jsonDecode(res.body);
+        final body = await compute<String, dynamic>(jsonDecode, res.body);
 
         if (res.statusCode == 200 || res.statusCode == 201) {
           final isOnboarded = body['user']?['is_onboarded'] ?? false;
@@ -181,7 +182,7 @@ class _SplashScreenState extends State<SplashScreen>
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    _buildLogoContainer(logoSize),
+                    RepaintBoundary(child: _buildLogoContainer(logoSize)),
                     const SizedBox(height: 32),
                     Text(
                       'DELULU',
@@ -201,7 +202,7 @@ class _SplashScreenState extends State<SplashScreen>
                       ),
                     ),
                     const SizedBox(height: 16),
-                    _buildObsidianDreamLabel(),
+                    RepaintBoundary(child: _buildObsidianDreamLabel()),
                     const SizedBox(height: 24),
                     Text(
                       'Curate Your Aura',

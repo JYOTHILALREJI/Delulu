@@ -349,7 +349,30 @@ class _SignupScreenState extends State<SignupScreen> {
                           ),
                         ],
                       ),
-                      const SizedBox(height: 40),
+                      const SizedBox(height: 32),
+                      Center(
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.verified_user_outlined,
+                                size: 14,
+                                color: AppColors.outline
+                                    .withValues(alpha: 0.4)),
+                            const SizedBox(width: 6),
+                            Text(
+                              'End-to-End Encryption Available',
+                              style: GoogleFonts.inter(
+                                fontSize: 10,
+                                color:
+                                    AppColors.outline.withValues(alpha: 0.4),
+                                fontWeight: FontWeight.w600,
+                                letterSpacing: 0.8,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 20),
                     ],
                   ),
                 ),

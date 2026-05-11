@@ -106,6 +106,16 @@ class _VisionBoardScreenState extends State<VisionBoardScreen> {
   }
 
   void _togglePrivate(int index) {
+    if (index < 3) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('The first 3 photos in your Vision Board must remain public.'),
+          backgroundColor: AppColors.error,
+        ),
+      );
+      return;
+    }
+
     final bool willBePrivate = !(_photos[index]['is_private'] ?? false);
     
     if (willBePrivate && _photos[index]['is_primary'] == true) {
@@ -148,6 +158,14 @@ class _VisionBoardScreenState extends State<VisionBoardScreen> {
     setState(() {
       final item = _photos.removeAt(oldIndex);
       _photos.insert(newIndex, item);
+      
+      // Auto-fix privacy: If a private photo is moved to the first 3 slots, make it public
+      for (int i = 0; i < _photos.length; i++) {
+        if (i < 3 && _photos[i]['is_private'] == true) {
+          _photos[i] = Map<String, dynamic>.from(_photos[i]);
+          _photos[i]['is_private'] = false;
+        }
+      }
     });
     _savePhotos();
   }
@@ -334,14 +352,15 @@ class _VisionBoardScreenState extends State<VisionBoardScreen> {
                                 ),
                                 onPressed: () => _togglePrimary(index),
                               ),
-                              IconButton(
-                                icon: Icon(
-                                  isPrivate ? Icons.visibility_off : Icons.visibility,
-                                  color: isPrivate ? AppColors.primary : Colors.white,
-                                  size: 20,
+                              if (index >= 3)
+                                IconButton(
+                                  icon: Icon(
+                                    isPrivate ? Icons.visibility_off : Icons.visibility,
+                                    color: isPrivate ? AppColors.primary : Colors.white,
+                                    size: 20,
+                                  ),
+                                  onPressed: () => _togglePrivate(index),
                                 ),
-                                onPressed: () => _togglePrivate(index),
-                              ),
                               IconButton(
                                 icon: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 20),
                                 onPressed: () => _deletePhoto(index),

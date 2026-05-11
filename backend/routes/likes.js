@@ -25,6 +25,27 @@ router.post('/like', authMiddleware, async (req, res) => {
        ON CONFLICT (liker_user_id, liked_user_id) DO NOTHING`,
             [likerUserId, likedUserId]
         );
+
+        // Update liked user's likes_count and popularity_score
+        await db.query(
+            'UPDATE profiles SET likes_count = likes_count + 1 WHERE user_id = $1',
+            [likedUserId]
+        );
+        
+        await db.query(`
+            UPDATE profiles 
+            SET popularity_score = (
+              (likes_count * 2) + 
+              (streak_count * 5) + 
+              (CASE 
+                WHEN last_seen_at >= NOW() - INTERVAL '1 day' THEN 10
+                WHEN last_seen_at >= NOW() - INTERVAL '3 days' THEN 5
+                ELSE 0
+               END)
+            )
+            WHERE user_id = $1
+        `, [likedUserId]);
+
         res.json({ success: true });
     } catch (err) {
         console.error('Like error:', err);
