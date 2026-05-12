@@ -150,7 +150,7 @@ class WhispersScreenState extends State<WhispersScreen> {
                         onRefresh: fetchConnections,
                         color: AppColors.primary,
                         child: ListView.builder(
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                          padding: const EdgeInsets.fromLTRB(16, 8, 16, 110),
                           itemCount: _connections.length,
                           itemBuilder: (context, index) {
                             final conn = _connections[index];

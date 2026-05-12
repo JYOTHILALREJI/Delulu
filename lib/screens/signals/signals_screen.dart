@@ -174,7 +174,7 @@ class SignalsScreenState extends State<SignalsScreen> {
                             onRefresh: fetchData,
                             color: AppColors.primary,
                             child: ListView.builder(
-                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                              padding: const EdgeInsets.fromLTRB(16, 8, 16, 110),
                               itemCount: sortedProfiles.length,
                               itemBuilder: (context, index) {
                                 return _buildProfileCard(sortedProfiles[index]);

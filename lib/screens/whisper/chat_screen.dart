@@ -10,7 +10,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../../theme/app_colors.dart';
 import '../../../services/api_service.dart';
 import '../../../services/socket_service.dart';
-import '../../../components/delulu_chat_background.dart';
 import 'package:vibration/vibration.dart';
 import '../aura/public_aura_screen.dart';
 import 'package:record/record.dart';
@@ -34,8 +33,13 @@ Map<String, dynamic> _parseSingleMessage(Map<String, dynamic> msg) {
       msg['_parsed_game_data'] = jsonDecode(msg['content']);
     } catch (_) {}
   }
-  if (msg['content'] is String && EncryptionHelper.isEncrypted(msg['content'])) {
-    msg['content'] = EncryptionHelper.decryptMessage(msg['content']);
+  
+  if (msg['content'] is String && msg['content'].toString().isNotEmpty) {
+    if (EncryptionHelper.isEncrypted(msg['content'].toString())) {
+      try {
+        msg['content'] = EncryptionHelper.decryptMessage(msg['content'].toString());
+      } catch (_) {}
+    }
   }
   return msg;
 }
@@ -119,6 +123,9 @@ class _ChatScreenState extends State<ChatScreen> {
     _fetchPeerProfile();
     _markRead();
     _initSocket();
+    
+    // Fix typing indicator: add listener
+    _msgController.addListener(_onTypingChanged);
   }
 
   Future<void> _loadCachedData() async {
@@ -128,19 +135,34 @@ class _ChatScreenState extends State<ChatScreen> {
       if (cachedId != null) {
         _currentUserId = cachedId;
       }
+      
+      // Fast-track premium status from cache for immediate UI feedback
+      if (mounted) {
+        setState(() {
+          _isPremium = prefs.getBool('is_premium') ?? false;
+        });
+      }
 
       final cachedMsgs = prefs.getString('chat_messages_${widget.channelId}');
       if (cachedMsgs != null) {
         final body = await compute<String, dynamic>(_processMessagesResponse, cachedMsgs);
         if (mounted) {
           setState(() {
-            _messages = List<Map<String, dynamic>>.from((body['messages'] ?? []).reversed);
+            _messages = List<Map<String, dynamic>>.from(body['messages'] ?? []);
+            // Sort DESC (newest first)
+            _messages.sort((a, b) {
+              final da = DateTime.tryParse(a['created_at'] ?? '') ?? DateTime(0);
+              final db = DateTime.tryParse(b['created_at'] ?? '') ?? DateTime(0);
+              return db.compareTo(da);
+            });
             _isLoading = false;
           });
           _scrollToBottom(jump: true);
         }
       }
-    } catch (_) {}
+    } catch (_) {
+      if (mounted) setState(() => _isLoading = false);
+    }
   }
 
   void _initPeerImageProvider() {
@@ -198,6 +220,18 @@ class _ChatScreenState extends State<ChatScreen> {
             if (m['read_at'] == null && m['sender_id'].toString() == _currentUserId) {
               m['read_at'] = data['readAt'] ?? DateTime.now().toIso8601String();
             }
+          }
+        });
+      }
+    });
+
+    // Listen for message updates
+    SocketService().messageUpdateStream.listen((data) {
+      if (mounted && data['channel_id'] == widget.channelId) {
+        setState(() {
+          final index = _messages.indexWhere((m) => m['id'] == data['id']);
+          if (index != -1) {
+            _messages[index] = _parseSingleMessage(Map<String, dynamic>.from(data));
           }
         });
       }
@@ -385,6 +419,9 @@ class _ChatScreenState extends State<ChatScreen> {
             });
             
             _isPremium = body['user']['is_premium'] == true;
+            SharedPreferences.getInstance().then((prefs) {
+              prefs.setBool('is_premium', _isPremium);
+            });
             _e2eEnabled = body['user']['e2e_encryption_enabled'] ?? false;
             _typingIndicatorEnabled = body['user']['typing_indicator_enabled'] ?? true;
             
@@ -427,14 +464,16 @@ class _ChatScreenState extends State<ChatScreen> {
             _messages = deduped.values.toList();
             // Sort DESC (newest first)
             _messages.sort((a, b) {
-              final da = DateTime.parse(a['created_at']);
-              final db = DateTime.parse(b['created_at']);
+              final da = DateTime.tryParse(a['created_at'] ?? '') ?? DateTime(0);
+              final db = DateTime.tryParse(b['created_at'] ?? '') ?? DateTime(0);
               return db.compareTo(da);
             });
             
             _isLoading = false;
           });
         }
+      } else {
+        if (mounted) setState(() => _isLoading = false);
       }
     } catch (e) {
       if (mounted) setState(() => _isLoading = false);
@@ -1025,320 +1064,286 @@ class _ChatScreenState extends State<ChatScreen> {
           ),
         ],
       ),
-      body: DeluluChatBackground(
-        scrollController: _scrollController,
-        child: GestureDetector(
-          onTap: () => FocusScope.of(context).unfocus(),
-          child: Column(
-              children: [
-                Expanded(
-                  child: _isLoading
-                      ? const Center(child: CircularProgressIndicator(color: AppColors.primaryContainer))
-                      : RepaintBoundary(
-                          child: ListView.builder(
-                          controller: _scrollController,
-                          reverse: true,
-                          physics: const BouncingScrollPhysics(
-                            parent: AlwaysScrollableScrollPhysics(),
-                          ),
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
-                          itemCount: _messages.length,
-                          cacheExtent: 800,
-                          addAutomaticKeepAlives: false,
-                          addRepaintBoundaries: true,
-                          itemBuilder: (context, index) {
-                            final msg = _messages[index];
-                            final id = msg['id'] is int ? msg['id'] : (int.tryParse(msg['id']?.toString() ?? '') ?? 0);
-                            if (!_messageKeys.containsKey(id)) {
-                              _messageKeys[id] = GlobalKey();
-                            }
+      body: Stack(
+        children: [
+          Positioned.fill(
+            child: Image.asset(
+              'assets/images/chat_bg.png',
+              fit: BoxFit.cover,
+            ),
+          ),
+          Positioned.fill(
+            child: Container(color: Colors.black.withOpacity(0.4)),
+          ),
+          GestureDetector(
+            onTap: () => FocusScope.of(context).unfocus(),
+            child: Column(
+                children: [
+                  Expanded(
+                    child: _isLoading
+                        ? const Center(child: CircularProgressIndicator(color: AppColors.primaryContainer))
+                        : RepaintBoundary(
+                            child: ListView.builder(
+                            controller: _scrollController,
+                            reverse: true,
+                            physics: const BouncingScrollPhysics(
+                              parent: AlwaysScrollableScrollPhysics(),
+                            ),
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+                            itemCount: _messages.length,
+                            cacheExtent: 800,
+                            addAutomaticKeepAlives: false,
+                            addRepaintBoundaries: true,
+                            itemBuilder: (context, index) {
+                              final msg = _messages[index];
+                              final id = msg['id'] is int ? msg['id'] : (int.tryParse(msg['id']?.toString() ?? '') ?? 0);
+                              if (!_messageKeys.containsKey(id)) {
+                                _messageKeys[id] = GlobalKey();
+                              }
 
-                            final isMe = msg['sender_id'].toString() == _currentUserId.toString();
-                            final isFailed = msg['failed'] == true;
-                            final type = msg['message_type'] ?? 'text';
+                              final isMe = msg['sender_id'].toString() == _currentUserId.toString();
+                              final isFailed = msg['failed'] == true;
+                              final type = msg['message_type'] ?? 'text';
 
-                            bool isGrouped = false;
-                            if (index > 0) {
-                              final youngerMsg = _messages[index - 1];
-                              if (youngerMsg['sender_id'].toString() == msg['sender_id'].toString()) {
-                                final currDate = msg['_parsed_date'] as DateTime?;
-                                final youngerDate = youngerMsg['_parsed_date'] as DateTime?;
-                                if (currDate != null && youngerDate != null) {
-                                  if (youngerDate.difference(currDate).inMinutes.abs() < 5) {
-                                    isGrouped = true;
+                              bool isGrouped = false;
+                              if (index > 0) {
+                                final youngerMsg = _messages[index - 1];
+                                if (youngerMsg['sender_id'].toString() == msg['sender_id'].toString()) {
+                                  final currDate = msg['_parsed_date'] as DateTime?;
+                                  final youngerDate = youngerMsg['_parsed_date'] as DateTime?;
+                                  if (currDate != null && youngerDate != null) {
+                                    if (youngerDate.difference(currDate).inMinutes.abs() < 5) {
+                                      isGrouped = true;
+                                    }
                                   }
                                 }
                               }
-                            }
 
-                            bool showDateDivider = false;
-                            if (index == _messages.length - 1) {
-                              showDateDivider = true;
-                            } else {
-                              final olderMsg = _messages[index + 1];
-                              final olderDate = olderMsg['_parsed_date'] as DateTime?;
-                              final currDate = msg['_parsed_date'] as DateTime?;
-                              if (olderDate != null && currDate != null) {
-                                if (olderDate.year != currDate.year || olderDate.month != currDate.month || olderDate.day != currDate.day) {
-                                  showDateDivider = true;
+                              bool showDateDivider = false;
+                              if (index == _messages.length - 1) {
+                                showDateDivider = true;
+                              } else {
+                                final olderMsg = _messages[index + 1];
+                                final olderDate = olderMsg['_parsed_date'] as DateTime?;
+                                final currDate = msg['_parsed_date'] as DateTime?;
+                                if (olderDate != null && currDate != null) {
+                                  if (olderDate.year != currDate.year || olderDate.month != currDate.month || olderDate.day != currDate.day) {
+                                    showDateDivider = true;
+                                  }
                                 }
                               }
-                            }
 
-                            Widget content;
-                            if (type == 'game_status') {
-                              content = Center(
-                                key: _messageKeys[id],
-                                child: Padding(
-                                  padding: const EdgeInsets.symmetric(vertical: 12),
-                                  child: _buildGameStatusCard(msg),
-                                ),
-                              );
-                            } else {
-                              content = _ChatBubble(
-                                key: _messageKeys[id],
-                                msg: msg,
-                                isMe: isMe,
-                                isFailed: isFailed,
-                                isGrouped: isGrouped,
-                                screenWidth: MediaQuery.of(context).size.width,
-                                onReply: (m) => setState(() => _replyingTo = m),
-                                onScrollToMessage: _scrollToMessage,
-                              );
-                            }
+                              Widget content;
+                              if (type == 'game_status') {
+                                content = Center(
+                                  key: _messageKeys[id],
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(vertical: 12),
+                                    child: _buildGameStatusCard(msg),
+                                  ),
+                                );
+                              } else {
+                                content = _ChatBubble(
+                                  key: _messageKeys[id],
+                                  msg: msg,
+                                  isMe: isMe,
+                                  isFailed: isFailed,
+                                  isGrouped: isGrouped,
+                                  screenWidth: MediaQuery.of(context).size.width,
+                                  onReply: (m) => setState(() => _replyingTo = m),
+                                  onScrollToMessage: _scrollToMessage,
+                                );
+                              }
 
-                            if (showDateDivider) {
-                              return Column(
-                                children: [
-                                  _buildDateDivider(msg['created_at']),
-                                  content,
-                                ],
-                              );
-                            }
-                            return content;
-                          },
-                        ),
-                      ),
-                ),
-                if (_replyingTo != null) _buildReplyPreview(),
-              Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: GestureDetector(
-                      onLongPress: _handleAttentionSeeker,
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 300),
-                        width: 50,
-                        height: 50,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          gradient: LinearGradient(
-                            colors: _isAttentionCooldownActive
-                                ? [Colors.grey.shade800, Colors.grey.shade900]
-                                : [AppColors.primary, AppColors.tertiary],
-                          ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: (_isAttentionCooldownActive ? Colors.black : AppColors.primary)
-                                  .withOpacity(0.3),
-                              blurRadius: 10,
-                              spreadRadius: 2,
-                            ),
-                          ],
-                        ),
-                        child: Center(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(
-                                _isAttentionCooldownActive ? Icons.timer_outlined : Icons.vibration,
-                                color: Colors.white,
-                                size: _isAttentionCooldownActive ? 16 : 24,
-                              ),
-                              if (_isAttentionCooldownActive)
-                                Text(
-                                  _cooldownRemaining.split(' ').first,
-                                  style: GoogleFonts.inter(fontSize: 8, color: Colors.white70),
-                                ),
-                            ],
+                              if (showDateDivider) {
+                                return Column(
+                                  children: [
+                                    _buildDateDivider(msg['created_at']),
+                                    content,
+                                  ],
+                                );
+                              }
+                              return content;
+                            },
                           ),
                         ),
-                      ),
-                    ),
                   ),
+                  if (_replyingTo != null) _buildReplyPreview(),
+                  _buildAttentionSeekerButton(),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF2A2B2E),
+                      color: const Color(0xFF2A2B2E).withOpacity(0.8),
                       border: Border(top: BorderSide(color: Colors.white.withOpacity(0.05))),
                     ),
                     child: Row(
-                      children: [
-                        if (_isRecording)
-                          Expanded(
-                            child: Container(
-                              height: 48,
-                              padding: const EdgeInsets.symmetric(horizontal: 16),
-                              decoration: BoxDecoration(
-                                color: Colors.white.withOpacity(0.05),
-                                borderRadius: BorderRadius.circular(24),
-                                border: Border.all(color: Colors.white.withOpacity(0.1)),
-                              ),
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    _isRecordingLocked ? Icons.lock : Icons.mic,
-                                    color: Colors.redAccent,
-                                    size: 20,
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Text(
-                                    '${(_recordingDuration ~/ 60).toString().padLeft(2, '0')}:${(_recordingDuration % 60).toString().padLeft(2, '0')}',
-                                    style: GoogleFonts.jetBrainsMono(color: Colors.white, fontWeight: FontWeight.bold),
-                                  ),
-                                  const Spacer(),
-                                  if (!_isRecordingLocked)
-                                    Text(
-                                      _isRecordingCancelled ? 'Release to cancel' : 'Slide to cancel',
-                                      style: GoogleFonts.inter(color: Colors.white38, fontSize: 13),
-                                    ),
-                                  if (_isRecordingLocked)
-                                    GestureDetector(
-                                      onTap: () {
-                                        setState(() => _isRecordingCancelled = true);
-                                        _stopRecording();
-                                      },
-                                      child: Text(
-                                        'CANCEL',
-                                        style: GoogleFonts.inter(color: Colors.redAccent, fontWeight: FontWeight.bold, fontSize: 13),
-                                      ),
-                                    ),
-                                ],
-                              ),
-                            ),
-                          )
-                        else
-                          Expanded(
-                            child: Container(
-                              decoration: BoxDecoration(
-                                color: Colors.white.withOpacity(0.05),
-                                borderRadius: BorderRadius.circular(24),
-                              ),
-                              child: TextField(
-                                controller: _msgController,
-                                style: const TextStyle(color: Colors.white),
-                                decoration: InputDecoration(
-                                  hintText: 'Type a message...',
-                                  hintStyle: TextStyle(color: Colors.white.withOpacity(0.3)),
-                                  border: InputBorder.none,
-                                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                                ),
-                                onChanged: (_) => setState(() {}),
-                              ),
-                            ),
-                          ),
-                        const SizedBox(width: 8),
-                        (() {
-                          if (_msgController.text.trim().isNotEmpty || _isRecordingLocked) {
-                            return GestureDetector(
-                              onTap: _isRecordingLocked ? _stopRecording : _sendMessage,
+                        children: [
+                          if (_isRecording)
+                            Expanded(
                               child: Container(
-                                width: 48,
                                 height: 48,
+                                padding: const EdgeInsets.symmetric(horizontal: 16),
                                 decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  gradient: const LinearGradient(
-                                    colors: [AppColors.primary, AppColors.tertiary],
-                                  ),
+                                  color: Colors.white.withOpacity(0.05),
+                                  borderRadius: BorderRadius.circular(24),
+                                  border: Border.all(color: Colors.white.withOpacity(0.1)),
                                 ),
-                                child: const Icon(Icons.send, color: Colors.white),
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      _isRecordingLocked ? Icons.lock : Icons.mic,
+                                      color: Colors.redAccent,
+                                      size: 20,
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Text(
+                                      '${(_recordingDuration ~/ 60).toString().padLeft(2, '0')}:${(_recordingDuration % 60).toString().padLeft(2, '0')}',
+                                      style: GoogleFonts.jetBrainsMono(color: Colors.white, fontWeight: FontWeight.bold),
+                                    ),
+                                    const Spacer(),
+                                    if (!_isRecordingLocked)
+                                      Text(
+                                        _isRecordingCancelled ? 'Release to cancel' : 'Slide to cancel',
+                                        style: GoogleFonts.inter(color: Colors.white38, fontSize: 13),
+                                      ),
+                                    if (_isRecordingLocked)
+                                      GestureDetector(
+                                        onTap: () {
+                                          setState(() => _isRecordingCancelled = true);
+                                          _stopRecording();
+                                        },
+                                        child: Text(
+                                          'CANCEL',
+                                          style: GoogleFonts.inter(color: Colors.redAccent, fontWeight: FontWeight.bold, fontSize: 13),
+                                        ),
+                                      ),
+                                  ],
+                                ),
                               ),
-                            );
-                          } else {
-                            return GestureDetector(
-                              onTap: () => _showCustomToast('Hold to record', isError: false),
-                              onLongPress: _startRecording,
-                              onLongPressMoveUpdate: (details) {
-                                if (_isRecording && !_isRecordingLocked) {
-                                  if (details.offsetFromOrigin.dx < -80) {
-                                    if (!_isRecordingCancelled) {
-                                      setState(() => _isRecordingCancelled = true);
+                            )
+                          else
+                            Expanded(
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withOpacity(0.05),
+                                  borderRadius: BorderRadius.circular(24),
+                                ),
+                                child: TextField(
+                                  controller: _msgController,
+                                  style: const TextStyle(color: Colors.white),
+                                  decoration: InputDecoration(
+                                    hintText: 'Type a message...',
+                                    hintStyle: TextStyle(color: Colors.white.withOpacity(0.3)),
+                                    border: InputBorder.none,
+                                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                                  ),
+                                  onChanged: (_) => setState(() {}),
+                                ),
+                              ),
+                            ),
+                          const SizedBox(width: 8),
+                          (() {
+                            if (_msgController.text.trim().isNotEmpty || _isRecordingLocked) {
+                              return GestureDetector(
+                                onTap: _isRecordingLocked ? _stopRecording : _sendMessage,
+                                child: Container(
+                                  width: 48,
+                                  height: 48,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    gradient: const LinearGradient(
+                                      colors: [AppColors.primary, AppColors.tertiary],
+                                    ),
+                                  ),
+                                  child: const Icon(Icons.send, color: Colors.white),
+                                ),
+                              );
+                            } else {
+                              return GestureDetector(
+                                onTap: () => _showCustomToast('Hold to record', isError: false),
+                                onLongPress: _startRecording,
+                                onLongPressMoveUpdate: (details) {
+                                  if (_isRecording && !_isRecordingLocked) {
+                                    if (details.offsetFromOrigin.dx < -80) {
+                                      if (!_isRecordingCancelled) {
+                                        setState(() => _isRecordingCancelled = true);
+                                        _triggerVibrationShort();
+                                      }
+                                    } else {
+                                      if (_isRecordingCancelled) {
+                                        setState(() => _isRecordingCancelled = false);
+                                      }
+                                    }
+                                    
+                                    if (details.offsetFromOrigin.dy < -80) {
+                                      setState(() {
+                                        _isRecordingLocked = true;
+                                        _isRecordingCancelled = false;
+                                      });
                                       _triggerVibrationShort();
                                     }
-                                  } else {
-                                    if (_isRecordingCancelled) {
-                                      setState(() => _isRecordingCancelled = false);
-                                    }
                                   }
-                                  
-                                  if (details.offsetFromOrigin.dy < -80) {
-                                    setState(() {
-                                      _isRecordingLocked = true;
-                                      _isRecordingCancelled = false;
-                                    });
-                                    _triggerVibrationShort();
+                                },
+                                onLongPressUp: () {
+                                  if (!_isRecordingLocked) {
+                                    _stopRecording();
                                   }
-                                }
-                              },
-                              onLongPressUp: () {
-                                if (!_isRecordingLocked) {
-                                  _stopRecording();
-                                }
-                              },
-                              child: Stack(
-                                alignment: Alignment.center,
-                                children: [
-                                  if (_isRecording && !_isRecordingLocked)
-                                    Positioned(
-                                      bottom: 60,
-                                      child: Column(
-                                        children: [
-                                          const Icon(Icons.lock_outline, color: Colors.white54, size: 20),
-                                          Text('Lock', style: GoogleFonts.inter(color: Colors.white54, fontSize: 10)),
-                                        ],
+                                },
+                                child: Stack(
+                                  alignment: Alignment.center,
+                                  children: [
+                                    if (_isRecording && !_isRecordingLocked)
+                                      Positioned(
+                                        bottom: 60,
+                                        child: Column(
+                                          children: [
+                                            const Icon(Icons.lock_outline, color: Colors.white54, size: 20),
+                                            Text('Lock', style: GoogleFonts.inter(color: Colors.white54, fontSize: 10)),
+                                          ],
+                                        ),
+                                      ),
+                                    AnimatedContainer(
+                                      duration: const Duration(milliseconds: 200),
+                                      width: _isRecording ? 64 : 48,
+                                      height: _isRecording ? 64 : 48,
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        color: _isRecording ? Colors.redAccent : Colors.white.withOpacity(0.05),
+                                        boxShadow: _isRecording ? [
+                                          BoxShadow(color: Colors.redAccent.withOpacity(0.4), blurRadius: 15, spreadRadius: 2)
+                                        ] : [],
+                                      ),
+                                      child: Icon(
+                                        _isRecording ? Icons.mic : Icons.mic, 
+                                        color: Colors.white,
+                                        size: _isRecording ? 32 : 24,
                                       ),
                                     ),
-                                  AnimatedContainer(
-                                    duration: const Duration(milliseconds: 200),
-                                    width: _isRecording ? 64 : 48,
-                                    height: _isRecording ? 64 : 48,
-                                    decoration: BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      color: _isRecording ? Colors.redAccent : Colors.white.withOpacity(0.05),
-                                      boxShadow: _isRecording ? [
-                                        BoxShadow(color: Colors.redAccent.withOpacity(0.4), blurRadius: 15, spreadRadius: 2)
-                                      ] : [],
-                                    ),
-                                    child: Icon(
-                                      _isRecording ? Icons.mic : Icons.mic, 
-                                      color: Colors.white,
-                                      size: _isRecording ? 32 : 24,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            );
-                          }
-                        })(),
-                      ],
+                                  ],
+                                ),
+                              );
+                            }
+                          })(),
+                        ],
+                      ),
                     ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
+                  ],
+                ),
+            ),
+        ],
       ),
     );
   }
 
   Map<String, dynamic> _parseSingleMessage(Map<String, dynamic> msg) {
     String content = msg['content'] ?? '';
-    if (_e2eEnabled && msg['message_type'] != 'voice' && !content.isEmpty && !msg.containsKey('pending')) {
-       try { content = EncryptionHelper.decryptMessage(content); } catch (_) {}
+    
+    if (content.isNotEmpty && !msg.containsKey('pending')) {
+       if (EncryptionHelper.isEncrypted(content)) {
+          try { content = EncryptionHelper.decryptMessage(content); } catch (_) {}
+       }
     }
+    
     return {
       ...msg,
       'content': content,
@@ -1394,6 +1399,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Widget _buildGameStatusCard(Map<String, dynamic> msg) {
     Map<String, dynamic> data = msg['_parsed_game_data'] ?? {};
+    final isMe = msg['sender_id'].toString() == _currentUserId.toString();
 
     final status = data['status'] ?? 'unknown';
     final gameName = data['gameName'] ?? 'Game';
@@ -1433,66 +1439,104 @@ class _ChatScreenState extends State<ChatScreen> {
     return Container(
       width: double.infinity,
       constraints: const BoxConstraints(maxWidth: 300),
-      child: InkWell(
-        onTap: (status == 'accepted' || status == 'completed') 
-            ? () => _navigateToGame(data['gameId'] ?? '', gameName, sessionId: sessionId, viewOnly: true)
-            : null,
-        borderRadius: BorderRadius.circular(24),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-          decoration: BoxDecoration(
-            color: statusColor.withOpacity(0.08),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          InkWell(
+            onTap: (status == 'accepted' || status == 'completed') 
+                ? () => _navigateToGame(data['gameId'] ?? '', gameName, sessionId: sessionId, viewOnly: true)
+                : null,
             borderRadius: BorderRadius.circular(24),
-            border: Border.all(color: statusColor.withOpacity(0.15), width: 1.5),
-            boxShadow: [
-              BoxShadow(
-                color: statusColor.withOpacity(0.05),
-                blurRadius: 10,
-                spreadRadius: 2,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              decoration: BoxDecoration(
+                color: statusColor.withOpacity(0.08),
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(color: statusColor.withOpacity(0.15), width: 1.5),
+                boxShadow: [
+                  BoxShadow(
+                    color: statusColor.withOpacity(0.05),
+                    blurRadius: 10,
+                    spreadRadius: 2,
+                  ),
+                ],
               ),
-            ],
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: statusColor.withOpacity(0.1),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(statusIcon, color: statusColor, size: 20),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          statusText,
+                          style: GoogleFonts.outfit(
+                            fontWeight: FontWeight.bold, 
+                            color: Colors.white, 
+                            fontSize: 15,
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          gameName,
+                          style: GoogleFonts.inter(
+                            color: statusColor.withOpacity(0.7), 
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (status == 'accepted' || status == 'completed')
+                    Icon(Icons.arrow_forward_ios, color: statusColor.withOpacity(0.5), size: 12),
+                ],
+              ),
+            ),
           ),
-          child: Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(10),
+          if (status == 'pending' && !isMe) ...[
+            const SizedBox(height: 8),
+            GestureDetector(
+              onTap: () {
+                SocketService().emitGameInviteResponse(
+                  widget.channelId,
+                  widget.peerId,
+                  data['gameId'] ?? '',
+                  gameName,
+                  sessionId ?? '',
+                  true
+                );
+                _navigateToGame(data['gameId'] ?? '', gameName, sessionId: sessionId);
+              },
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 12),
                 decoration: BoxDecoration(
-                  color: statusColor.withOpacity(0.1),
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(statusIcon, color: statusColor, size: 20),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      statusText,
-                      style: GoogleFonts.outfit(
-                        fontWeight: FontWeight.bold, 
-                        color: Colors.white, 
-                        fontSize: 15,
-                        letterSpacing: 0.5,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      gameName,
-                      style: GoogleFonts.inter(
-                        color: statusColor.withOpacity(0.7), 
-                        fontSize: 12,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
+                  gradient: const LinearGradient(colors: [AppColors.primary, AppColors.tertiary]),
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [
+                    BoxShadow(color: AppColors.primary.withOpacity(0.3), blurRadius: 8, offset: const Offset(0, 4))
                   ],
                 ),
+                child: Center(
+                  child: Text(
+                    "I'M IN",
+                    style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: Colors.white, letterSpacing: 1.5),
+                  ),
+                ),
               ),
-              if (status == 'accepted' || status == 'completed')
-                Icon(Icons.arrow_forward_ios, color: statusColor.withOpacity(0.5), size: 12),
-            ],
-          ),
-        ),
+            ),
+          ],
+        ],
       ),
     );
   }
@@ -1546,6 +1590,71 @@ class _ChatScreenState extends State<ChatScreen> {
             onPressed: () => setState(() => _replyingTo = null),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildAttentionSeekerButton() {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Tooltip(
+        message: _isAttentionCooldownActive && !_isPremium ? 'Upgrade to Rizz+ to use Attention Seeker' : '',
+        preferBelow: false,
+        triggerMode: TooltipTriggerMode.tap,
+        decoration: BoxDecoration(
+          color: const Color(0xFF8B5CF6),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        textStyle: GoogleFonts.inter(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600),
+        child: GestureDetector(
+          onLongPress: _handleAttentionSeeker,
+          onTap: () {
+            if (_isAttentionCooldownActive && !_isPremium) {
+              // Tooltip handles the message
+            } else if (_isAttentionCooldownActive) {
+               _showCustomToast('Cooldown active: $_cooldownRemaining', isError: true);
+            } else {
+               _handleAttentionSeeker();
+            }
+          },
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 300),
+            width: 54,
+            height: 54,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: LinearGradient(
+                colors: _isAttentionCooldownActive
+                    ? [const Color(0xFF374151), const Color(0xFF1F2937)]
+                    : [AppColors.primary, AppColors.tertiary],
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: (_isAttentionCooldownActive ? Colors.black26 : AppColors.primary.withOpacity(0.4)),
+                  blurRadius: 12,
+                  spreadRadius: 1,
+                ),
+              ],
+            ),
+            child: Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    _isAttentionCooldownActive ? Icons.timer_outlined : Icons.vibration,
+                    color: _isAttentionCooldownActive ? Colors.white38 : Colors.white,
+                    size: _isAttentionCooldownActive ? 18 : 26,
+                  ),
+                  if (_isAttentionCooldownActive)
+                    Text(
+                      _cooldownRemaining.split(' ').first,
+                      style: GoogleFonts.inter(fontSize: 9, color: Colors.white60, fontWeight: FontWeight.bold),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }

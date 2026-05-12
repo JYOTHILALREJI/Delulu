@@ -84,6 +84,7 @@ class _SignupScreenState extends State<SignupScreen> {
     return GestureDetector(
       onTap: () => FocusScope.of(context).unfocus(),
       child: Scaffold(
+        resizeToAvoidBottomInset: true,
         body: Container(
           decoration: const BoxDecoration(
             gradient: RadialGradient(
@@ -425,6 +426,7 @@ class _SignupScreenState extends State<SignupScreen> {
           fontSize: 15,
           color: AppColors.onSurface,
         ),
+        scrollPadding: const EdgeInsets.only(bottom: 150),
         decoration: InputDecoration(
           hintText: hint,
           hintStyle: GoogleFonts.beVietnamPro(

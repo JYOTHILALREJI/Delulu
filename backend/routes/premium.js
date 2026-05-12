@@ -66,4 +66,24 @@ router.post('/verify', async (req, res) => {
     }
 });
 
+// Get payment history for the current user
+const authMiddleware = require('../middleware/auth');
+router.get('/payment-history', authMiddleware, async (req, res) => {
+    try {
+        const result = await db.query(
+            `SELECT s.id, s.plan_id, s.store, s.expiry_date, s.created_at,
+                    sp.name AS plan_name, sp.price_text, sp.period_text
+             FROM subscriptions s
+             LEFT JOIN subscription_plans sp ON sp.id = s.plan_id
+             WHERE s.user_id = $1
+             ORDER BY s.created_at DESC`,
+            [req.userId]
+        );
+        res.json({ history: result.rows });
+    } catch (err) {
+        console.error('Payment history error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 module.exports = router;

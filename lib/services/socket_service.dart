@@ -21,6 +21,11 @@ class SocketService {
   final _gameInviteSentController = StreamController<Map<String, dynamic>>.broadcast();
   final _gameInviteResponseController = StreamController<Map<String, dynamic>>.broadcast();
   final _gameCancelledController = StreamController<Map<String, dynamic>>.broadcast();
+  final _gameStateController = StreamController<Map<String, dynamic>>.broadcast();
+  final _gamePointsController = StreamController<Map<String, dynamic>>.broadcast();
+  final _gameEndController = StreamController<Map<String, dynamic>>.broadcast();
+  final _messageUpdateController = StreamController<Map<String, dynamic>>.broadcast();
+  final _gameMissedController = StreamController<Map<String, dynamic>>.broadcast();
   final _errorController = StreamController<Map<String, dynamic>>.broadcast();
 
   Map<String, dynamic>? _lastInviteSent;
@@ -36,6 +41,11 @@ class SocketService {
   Stream<Map<String, dynamic>> get gameInviteSentStream => _gameInviteSentController.stream;
   Stream<Map<String, dynamic>> get gameInviteResponseStream => _gameInviteResponseController.stream;
   Stream<Map<String, dynamic>> get gameCancelledStream => _gameCancelledController.stream;
+  Stream<Map<String, dynamic>> get gameStateStream => _gameStateController.stream;
+  Stream<Map<String, dynamic>> get gamePointsStream => _gamePointsController.stream;
+  Stream<Map<String, dynamic>> get gameEndStream => _gameEndController.stream;
+  Stream<Map<String, dynamic>> get messageUpdateStream => _messageUpdateController.stream;
+  Stream<Map<String, dynamic>> get gameMissedStream => _gameMissedController.stream;
   Stream<Map<String, dynamic>> get errorStream => _errorController.stream;
 
   bool get connected => _socket?.connected ?? false;
@@ -86,6 +96,59 @@ class SocketService {
     _socket?.emit('game_session_update', {
       'sessionId': sessionId,
       'duration': duration,
+    });
+  }
+
+  void emitGameStateUpdate(String sessionId, Map<String, dynamic> state, String peerId) {
+    _socket?.emit('game_state_update', {
+      'sessionId': sessionId,
+      'state': state,
+      'peerId': peerId,
+    });
+  }
+
+  void emitGamePointUpdate(String sessionId, String userId, int points, String peerId) {
+    _socket?.emit('game_point_update', {
+      'sessionId': sessionId,
+      'userId': userId,
+      'points': points,
+      'peerId': peerId,
+    });
+  }
+
+  Stream<Map<String, dynamic>> get newMessageStream => _messageController.stream;
+
+  void emitSelectChoice(String sessionId, String choice, String peerId) {
+    _socket?.emit('select_choice', {
+      'sessionId': sessionId,
+      'choice': choice,
+      'peerId': peerId,
+    });
+  }
+
+  void emitSendQuestion(String sessionId, String question, String peerId) {
+    _socket?.emit('send_question', {
+      'sessionId': sessionId,
+      'question': question,
+      'peerId': peerId,
+    });
+  }
+
+  void emitSubmitAnswer(String sessionId, String answer, String peerId, String messageType, {int duration = 0}) {
+    _socket?.emit('submit_answer', {
+      'sessionId': sessionId,
+      'answer': answer,
+      'peerId': peerId,
+      'messageType': messageType,
+      'duration': duration,
+    });
+  }
+
+  void emitGameEnd(int channelId, String peerId, String sessionId) {
+    _socket?.emit('game_end', {
+      'channelId': channelId,
+      'peerId': peerId,
+      'sessionId': sessionId,
     });
   }
 
@@ -154,6 +217,26 @@ class SocketService {
       _gameCancelledController.add(data);
     });
 
+    _socket!.on('game_state_synced', (data) {
+      _gameStateController.add(data);
+    });
+
+    _socket!.on('game_points_synced', (data) {
+      _gamePointsController.add(data);
+    });
+
+    _socket!.on('message_updated', (data) {
+      _messageUpdateController.add(data);
+    });
+
+    _socket!.on('game_ended_by_peer', (data) {
+      _gameEndController.add(data);
+    });
+
+    _socket!.on('game_invite_missed', (data) {
+      _gameMissedController.add(data);
+    });
+
     _socket!.on('error_message', (data) {
       _errorController.add(data);
     });
@@ -178,6 +261,10 @@ class SocketService {
     _gameInviteSentController.close();
     _gameInviteResponseController.close();
     _gameCancelledController.close();
+    _gameStateController.close();
+    _gamePointsController.close();
+    _gameEndController.close();
+    _messageUpdateController.close();
     _errorController.close();
     disconnect();
   }

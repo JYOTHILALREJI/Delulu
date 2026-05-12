@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'dart:math' as math;
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../theme/app_colors.dart';
 import '../../services/api_service.dart';
@@ -59,9 +60,26 @@ class _SplashScreenState extends State<SplashScreen>
     _navigateNext();
   }
 
+  bool _hasError = false;
+  String _errorMessage = '';
+
   Future<void> _navigateNext() async {
-    await Future.delayed(const Duration(milliseconds: 4500));
-    if (!mounted) return;
+    // Wait for initial animation
+    await Future.delayed(const Duration(milliseconds: 2500));
+    
+    try {
+      // Check backend health/connectivity first
+      final healthRes = await ApiService.getVersion().timeout(const Duration(seconds: 10));
+      if (healthRes.statusCode != 200) throw Exception('Backend unavailable');
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _hasError = true;
+          _errorMessage = 'Unable to establish a secure connection with our servers.\nPlease check your internet and try again.';
+        });
+      }
+      return;
+    }
 
     final token = await ApiService.getToken();
 
@@ -91,25 +109,8 @@ class _SplashScreenState extends State<SplashScreen>
           Navigator.of(context).pushReplacementNamed('/login');
         }
       } catch (e) {
-        if (!mounted) return;
-        
-        final errorStr = e.toString().toLowerCase();
-        final isNetworkError = errorStr.contains('socketexception') || 
-                               errorStr.contains('timeoutexception') || 
-                               errorStr.contains('connection failed') ||
-                               errorStr.contains('host lookup');
-
-        if (isNetworkError) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: const Text('Network not available. Using cached data.', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
-              backgroundColor: AppColors.toastBackground,
-              behavior: SnackBarBehavior.floating,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            ),
-          );
-        }
-        
+        // If we reached here, connectivity was okay initially but failed now
+        // Fallback to local data or show error
         final userData = await ApiService.getUserData();
         final isOnboarded = userData['is_onboarded'] as bool;
         final displayName = userData['display_name'] as String;
@@ -126,6 +127,10 @@ class _SplashScreenState extends State<SplashScreen>
     } else {
       Navigator.of(context).pushReplacementNamed('/login');
     }
+  }
+
+  void _exitApp() {
+    SystemChannels.platform.invokeMethod('SystemNavigator.pop');
   }
 
   @override
@@ -167,76 +172,154 @@ class _SplashScreenState extends State<SplashScreen>
               color: AppColors.tertiaryContainer,
               dimension: size.width * 0.75,
             ),
-            Center(
-              child: AnimatedBuilder(
-                animation: _revealAnim,
-                builder: (_, child) {
-                  return Opacity(
-                    opacity: _revealAnim.value,
-                    child: Transform.scale(
-                      scale: 0.8 + 0.2 * _revealAnim.value,
-                      child: child,
-                    ),
-                  );
-                },
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    RepaintBoundary(child: _buildLogoContainer(logoSize)),
-                    const SizedBox(height: 32),
-                    Text(
-                      'DELULU',
-                      style: GoogleFonts.beVietnamPro(
-                        fontSize: 40,
-                        height: 1.2,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 4.0,
-                        color: AppColors.onPrimaryContainer,
-                        shadows: const [
-                          Shadow(
-                            blurRadius: 16,
-                            color: Colors.black54,
-                            offset: Offset(0, 4),
-                          ),
-                        ],
+            if (!_hasError) ...[
+              Center(
+                child: AnimatedBuilder(
+                  animation: _revealAnim,
+                  builder: (_, child) {
+                    return Opacity(
+                      opacity: _revealAnim.value,
+                      child: Transform.scale(
+                        scale: 0.8 + 0.2 * _revealAnim.value,
+                        child: child,
                       ),
-                    ),
-                    const SizedBox(height: 16),
-                    RepaintBoundary(child: _buildObsidianDreamLabel()),
-                    const SizedBox(height: 24),
-                    Text(
-                      'Curate Your Aura',
-                      style: GoogleFonts.beVietnamPro(
-                        fontSize: 14,
-                        height: 1.43,
-                        color: AppColors.onSurfaceVariant
-                            .withValues(alpha: 0.8),
-                        fontStyle: FontStyle.italic,
+                    );
+                  },
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      RepaintBoundary(child: _buildLogoContainer(logoSize)),
+                      const SizedBox(height: 32),
+                      Text(
+                        'DELULU',
+                        style: GoogleFonts.beVietnamPro(
+                          fontSize: 40,
+                          height: 1.2,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 4.0,
+                          color: AppColors.onPrimaryContainer,
+                          shadows: const [
+                            Shadow(
+                              blurRadius: 16,
+                              color: Colors.black54,
+                              offset: Offset(0, 4),
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
-                  ],
+                      const SizedBox(height: 16),
+                      RepaintBoundary(child: _buildObsidianDreamLabel()),
+                      const SizedBox(height: 24),
+                      Text(
+                        'Curate Your Aura',
+                        style: GoogleFonts.beVietnamPro(
+                          fontSize: 14,
+                          height: 1.43,
+                          color: AppColors.onSurfaceVariant
+                              .withValues(alpha: 0.8),
+                          fontStyle: FontStyle.italic,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              Positioned(
+                bottom: 80,
+                left: 0,
+                right: 0,
+                child: AnimatedBuilder(
+                  animation: _dotsController,
+                  builder: (_, __) {
+                    return Row(
+                      mainAxisSize: MainAxisSize.min,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        _buildPulseDot(_dotsController.value, 0.0),
+                        const SizedBox(width: 8),
+                        _buildPulseDot(_dotsController.value, 0.15),
+                        const SizedBox(width: 8),
+                        _buildPulseDot(_dotsController.value, 0.30),
+                      ],
+                    );
+                  },
+                ),
+              ),
+            ] else
+              _buildErrorUI(size),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildErrorUI(Size size) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 40),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: Colors.red.withOpacity(0.1),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.cloud_off_rounded, color: Colors.redAccent, size: 64),
+            ),
+            const SizedBox(height: 32),
+            Text(
+              'Connection Lost',
+              style: GoogleFonts.beVietnamPro(
+                fontSize: 24,
+                fontWeight: FontWeight.w700,
+                color: Colors.white,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              _errorMessage,
+              textAlign: TextAlign.center,
+              style: GoogleFonts.inter(
+                fontSize: 14,
+                color: Colors.white70,
+                height: 1.5,
+              ),
+            ),
+            const SizedBox(height: 48),
+            ElevatedButton(
+              onPressed: _exitApp,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.white10,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  side: const BorderSide(color: Colors.white24),
+                ),
+                elevation: 0,
+              ),
+              child: Text(
+                'EXIT APPLICATION',
+                style: GoogleFonts.outfit(
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 1.2,
                 ),
               ),
             ),
-            Positioned(
-              bottom: 80,
-              left: 0,
-              right: 0,
-              child: AnimatedBuilder(
-                animation: _dotsController,
-                builder: (_, __) {
-                  return Row(
-                    mainAxisSize: MainAxisSize.min,
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      _buildPulseDot(_dotsController.value, 0.0),
-                      const SizedBox(width: 8),
-                      _buildPulseDot(_dotsController.value, 0.15),
-                      const SizedBox(width: 8),
-                      _buildPulseDot(_dotsController.value, 0.30),
-                    ],
-                  );
-                },
+            const SizedBox(height: 16),
+            TextButton(
+              onPressed: () {
+                setState(() => _hasError = false);
+                _navigateNext();
+              },
+              child: Text(
+                'TRY AGAIN',
+                style: GoogleFonts.inter(
+                  color: AppColors.primary,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ),
           ],

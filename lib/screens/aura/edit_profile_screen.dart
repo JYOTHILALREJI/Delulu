@@ -4,17 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../../theme/app_colors.dart';
 import '../../../services/api_service.dart';
 import '../../../utils/interests_data.dart';
-import '../uploadedImages/vision_board.dart';
-import 'blocked_profiles_screen.dart';
-import '../../services/verification_service.dart';
-import 'package:permission_handler/permission_handler.dart';
-import 'package:geolocator/geolocator.dart';
-import 'package:geocoding/geocoding.dart';
-import 'package:package_info_plus/package_info_plus.dart';
-import 'dart:math';
 import '../../components/delulu_wavy_loader.dart';
-import '../premium/subscription_screen.dart';
-import '../discovery/location_picker_screen.dart';
 
 
 class EditProfileScreen extends StatefulWidget {
@@ -35,19 +25,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   late String _selectedSeeking;
   late List<String> _interests;
   late List<String> _suggestedInterests;
-  
-  // Settings
-  late bool _onlineEnabled;
-  late bool _typingEnabled;
-  late bool _lastSeenEnabled;
-  late bool _readReceiptEnabled;
-  late bool _liveLocationEnabled;
-  late bool _e2eEnabled;
-  late bool _hideLocationEnabled;
-  late bool _isVerified;
-  bool _isPremium = false;
-  String _appVersion = '';
-  
   bool _isLoading = false;
 
   @override
@@ -60,7 +37,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     _selectedGender = p['gender'] ?? '';
     _selectedSeeking = p['interested_in'] ?? '';
     
-    // Handle interests (could be a List or a JSON string)
     if (p['interests'] is String) {
       try {
         _interests = List<String>.from(jsonDecode(p['interests']));
@@ -74,85 +50,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     }
     
     _suggestedInterests = InterestsData.getRandomInterests(10);
-    
-    _onlineEnabled = p['online_status_enabled'] ?? true;
-    _typingEnabled = p['typing_indicator_enabled'] ?? true;
-    _lastSeenEnabled = p['last_seen_enabled'] ?? true;
-    _readReceiptEnabled = p['read_receipt_enabled'] ?? true;
-    _liveLocationEnabled = p['live_location_enabled'] ?? false;
-    _e2eEnabled = p['e2e_encryption_enabled'] ?? false;
-    _hideLocationEnabled = p['hide_location_enabled'] ?? false;
-    _isVerified = p['is_verified'] ?? false;
-    
-    _checkPremiumStatus();
-    _loadAppVersion();
-  }
-
-  Future<void> _checkPremiumStatus() async {
-    try {
-      final res = await ApiService.getMe();
-      if (res.statusCode == 200) {
-        final userData = jsonDecode(res.body);
-        final isPremium = userData['is_premium'] == true;
-        
-        setState(() {
-          _isPremium = isPremium;
-          // If premium expired, reset premium-only settings locally
-          if (!isPremium) {
-            _onlineEnabled = true;
-            _typingEnabled = true;
-            _lastSeenEnabled = true;
-            _readReceiptEnabled = true;
-            _e2eEnabled = false;
-            _hideLocationEnabled = false;
-          } else {
-             // Ensure local state matches DB if premium
-            _e2eEnabled = userData['e2e_encryption_enabled'] ?? false;
-            _hideLocationEnabled = userData['hide_location_enabled'] ?? false;
-            _onlineEnabled = userData['online_status_enabled'] ?? true;
-            _typingEnabled = userData['typing_indicator_enabled'] ?? true;
-            _lastSeenEnabled = userData['last_seen_enabled'] ?? true;
-            _readReceiptEnabled = userData['read_receipt_enabled'] ?? true;
-          }
-        });
-
-        // If premium expired, sync reset to backend
-        if (!isPremium && (userData['e2e_encryption_enabled'] == true || userData['hide_location_enabled'] == true)) {
-           await ApiService.saveProfile({
-             'e2e_encryption_enabled': false,
-             'hide_location_enabled': false,
-             'online_status_enabled': true,
-             'typing_indicator_enabled': true,
-             'last_seen_enabled': true,
-             'read_receipt_enabled': true,
-           });
-        }
-      }
-    } catch (_) {}
-  }
-
-  Future<void> _loadAppVersion() async {
-    try {
-      final res = await ApiService.getVersion();
-      if (res.statusCode == 200) {
-        final body = jsonDecode(res.body);
-        setState(() {
-          _appVersion = body['version'] ?? '1.0.0';
-        });
-      } else {
-        final packageInfo = await PackageInfo.fromPlatform();
-        setState(() {
-          _appVersion = packageInfo.version;
-        });
-      }
-    } catch (e) {
-      try {
-        final packageInfo = await PackageInfo.fromPlatform();
-        setState(() {
-          _appVersion = packageInfo.version;
-        });
-      } catch (_) {}
-    }
   }
 
   @override
@@ -208,207 +105,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     }
   }
 
-  Future<void> _updateSetting(String key, dynamic value) async {
-    // Premium gatekeeping check
-    final premiumKeys = [
-      'online_status_enabled', 
-      'typing_indicator_enabled', 
-      'last_seen_enabled', 
-      'read_receipt_enabled',
-      'e2e_encryption_enabled',
-      'hide_location_enabled'
-    ];
-    
-    if (premiumKeys.contains(key) && !_isPremium) {
-      _showPremiumPrompt();
-      return;
-    }
 
-    // Optimistic UI
-    setState(() {
-      if (key == 'online_status_enabled') _onlineEnabled = value;
-      if (key == 'typing_indicator_enabled') _typingEnabled = value;
-      if (key == 'last_seen_enabled') _lastSeenEnabled = value;
-      if (key == 'read_receipt_enabled') _readReceiptEnabled = value;
-      if (key == 'live_location_enabled') _liveLocationEnabled = value;
-      if (key == 'e2e_encryption_enabled') _e2eEnabled = value;
-      if (key == 'hide_location_enabled') _hideLocationEnabled = value;
-      if (key == 'is_verified') _isVerified = value;
-    });
-
-    try {
-      await ApiService.saveProfile({key: value});
-    } catch (e) {
-      // Revert if failed
-      setState(() {
-        if (key == 'online_status_enabled') _onlineEnabled = !value;
-        if (key == 'typing_indicator_enabled') _typingEnabled = !value;
-        if (key == 'last_seen_enabled') _lastSeenEnabled = !value;
-        if (key == 'read_receipt_enabled') _readReceiptEnabled = !value;
-        if (key == 'e2e_encryption_enabled') _e2eEnabled = !value;
-        if (key == 'hide_location_enabled') _hideLocationEnabled = !value;
-        if (key == 'live_location_enabled') _liveLocationEnabled = !value;
-      });
-    }
-  }
-
-  void _showPremiumPrompt() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: AppColors.surfaceContainerHigh,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        title: Row(
-          children: [
-            const Icon(Icons.star, color: Color(0xFF8B5CF6)),
-            const SizedBox(width: 12),
-            Text(
-              'Rizz+ Feature',
-              style: GoogleFonts.beVietnamPro(fontWeight: FontWeight.w700, color: Colors.white),
-            ),
-          ],
-        ),
-        content: Text(
-          'Gatekeeping settings are exclusive to Rizz+ members. Upgrade now to take full control of your privacy!',
-          style: GoogleFonts.inter(color: Colors.white70),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('LATER', style: GoogleFonts.inter(color: Colors.white54, fontWeight: FontWeight.bold)),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const SubscriptionScreen()),
-              ).then((_) => _checkPremiumStatus());
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF8B5CF6),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            ),
-            child: Text('GET RIZZ+', style: GoogleFonts.inter(color: Colors.white, fontWeight: FontWeight.bold)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _handleLocationToggle(bool value) async {
-    if (value) {
-      final status = await Permission.location.request();
-      if (status.isGranted) {
-        try {
-          final position = await Geolocator.getCurrentPosition(
-            desiredAccuracy: LocationAccuracy.low,
-          );
-          final random = Random();
-          final latOffset = (random.nextDouble() * 0.027 + 0.045) * (random.nextBool() ? 1 : -1);
-          final lngOffset = (random.nextDouble() * 0.027 + 0.045) * (random.nextBool() ? 1 : -1);
-          
-          final fuzzyLat = double.parse((position.latitude + latOffset).toStringAsFixed(3));
-          final fuzzyLng = double.parse((position.longitude + lngOffset).toStringAsFixed(3));
-          
-          String locName = 'Unknown Location';
-          try {
-            final placemarks = await placemarkFromCoordinates(fuzzyLat, fuzzyLng);
-            if (placemarks.isNotEmpty) {
-              final p = placemarks.first;
-              locName = '${p.subLocality ?? p.locality ?? ''}, ${p.administrativeArea ?? ''}'.trim();
-              if (locName.startsWith(',')) locName = locName.substring(1).trim();
-            }
-          } catch (_) {}
-
-          await ApiService.saveProfile({
-            'live_location_enabled': true,
-            'latitude': fuzzyLat,
-            'longitude': fuzzyLng,
-            'location_name': locName,
-          });
-          setState(() {
-            _liveLocationEnabled = true;
-            widget.profile['latitude'] = fuzzyLat;
-            widget.profile['longitude'] = fuzzyLng;
-            widget.profile['location_name'] = locName;
-          });
-        } catch (e) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Failed to get location')),
-            );
-          }
-          setState(() => _liveLocationEnabled = false);
-        }
-      } else {
-        setState(() => _liveLocationEnabled = false);
-      }
-    } else {
-      _updateSetting('live_location_enabled', false);
-    }
-  }
-
-  Future<void> _handleVerification() async {
-    if (_isVerified) return;
-
-    final status = await Permission.camera.request();
-    if (status.isGranted) {
-      final success = await Navigator.push<bool>(
-        context,
-        MaterialPageRoute(builder: (_) => const VerificationCameraScreen()),
-      );
-
-      if (success == true) {
-        await _updateSetting('is_verified', true);
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Profile Verified Successfully!')),
-          );
-        }
-      }
-    }
-  }
-
-  Future<void> _showLogoutDialog() async {
-    return showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: AppColors.surfaceContainerHigh,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        title: Text(
-          'Leaving so soon?',
-          style: GoogleFonts.beVietnamPro(fontWeight: FontWeight.w700, color: Colors.white),
-        ),
-        content: Text(
-          'Are you sure you want to logout? You\'ll be missed! 🥺',
-          style: GoogleFonts.inter(color: Colors.white70),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text(
-              'STAY',
-              style: GoogleFonts.inter(color: Colors.white54, fontWeight: FontWeight.bold),
-            ),
-          ),
-          TextButton(
-            onPressed: () async {
-              Navigator.pop(context);
-              await ApiService.clearToken();
-              if (mounted) {
-                Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false);
-              }
-            },
-            child: Text(
-              'LOGOUT',
-              style: GoogleFonts.inter(color: AppColors.error, fontWeight: FontWeight.bold),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 
   void _showChangePasswordDialog() {
     final currentPasswordController = TextEditingController();
@@ -687,6 +384,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       onTap: () => FocusScope.of(context).unfocus(),
       behavior: HitTestBehavior.opaque,
       child: Scaffold(
+        resizeToAvoidBottomInset: true,
         backgroundColor: AppColors.obsidianEdge,
         appBar: AppBar(
         backgroundColor: Colors.transparent,
@@ -717,35 +415,23 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             children: [
               _buildSectionHeader('ACCOUNT'),
               _buildReadOnlyField('Email', widget.profile['email'] ?? ''),
-              _buildSettingsNavTile(
-                icon: Icons.lock_outline,
-                label: 'Password',
-                trailingText: '••••••••',
+              ListTile(
                 onTap: _showChangePasswordDialog,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 0, vertical: 4),
+                leading: const Icon(Icons.lock_outline, color: AppColors.primary),
+                title: Text('Password',
+                    style: GoogleFonts.beVietnamPro(
+                        fontSize: 15, fontWeight: FontWeight.w600, color: Colors.white)),
+                trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Text('••••••••',
+                      style: GoogleFonts.inter(fontSize: 13, color: Colors.white38)),
+                  const SizedBox(width: 4),
+                  const Icon(Icons.chevron_right, color: Colors.white24, size: 20),
+                ]),
               ),
               _buildTextField('Display Name', _nameController, 'Your Name'),
               _buildTextField('Age', _ageController, 'Your Age', keyboardType: TextInputType.number),
               const SizedBox(height: 24),
-              
-              if (widget.profile['latitude'] == null) ...[
-                _buildSectionHeader('LOCATION'),
-                _buildSettingsNavTile(
-                  icon: Icons.location_on_outlined,
-                  label: 'Add Your Location',
-                  subtitle: 'Required for discovery and match-making.',
-                  onTap: () async {
-                    final result = await Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (_) => const LocationPickerScreen()),
-                    );
-                    if (result == true) {
-                      // Reload profile to reflect new location status
-                      _checkPremiumStatus(); // This refreshes userData
-                    }
-                  },
-                ),
-                const SizedBox(height: 32),
-              ],
 
               _buildLabel('Gender'),
               const SizedBox(height: 12),
@@ -785,103 +471,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
               ),
               const SizedBox(height: 48),
 
-              _buildSectionHeader('GATEKEEPING'),
-              _buildToggleTile(
-                icon: Icons.visibility,
-                label: 'Online Status',
-                value: _onlineEnabled,
-                onChanged: (v) => _updateSetting('online_status_enabled', v),
-                isPremium: true,
-              ),
-              _buildToggleTile(
-                icon: Icons.keyboard,
-                label: 'Typing Indicator',
-                value: _typingEnabled,
-                onChanged: (v) => _updateSetting('typing_indicator_enabled', v),
-                isPremium: true,
-              ),
-              _buildToggleTile(
-                icon: Icons.access_time,
-                label: 'Last Seen',
-                value: _lastSeenEnabled,
-                onChanged: (v) => _updateSetting('last_seen_enabled', v),
-                isPremium: true,
-              ),
-              _buildToggleTile(
-                icon: Icons.done_all,
-                label: 'Read Receipts',
-                value: _readReceiptEnabled,
-                onChanged: (v) => _updateSetting('read_receipt_enabled', v),
-                isPremium: true,
-              ),
-              _buildToggleTile(
-                icon: Icons.security,
-                label: 'E2E Encryption',
-                subtitle: 'Secure your conversations from end-to-end.',
-                value: _e2eEnabled,
-                onChanged: (v) => _updateSetting('e2e_encryption_enabled', v),
-                isPremium: true,
-              ),
-              _buildToggleTile(
-                icon: Icons.location_off,
-                label: 'Hide Location',
-                subtitle: 'Invisible mode for your precise location.',
-                value: _hideLocationEnabled,
-                onChanged: (v) => _updateSetting('hide_location_enabled', v),
-                isPremium: true,
-              ),
-              const SizedBox(height: 32),
-
-              _buildSectionHeader('PORTFOLIO'),
-              _buildSettingsNavTile(
-                icon: Icons.auto_awesome_mosaic,
-                label: 'Vision Board',
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const VisionBoardScreen()),
-                ).then((_) => setState(() {})),
-              ),
-              const SizedBox(height: 32),
-
-              _buildSectionHeader('PRIVACY & SECURITY'),
-              _buildSettingsNavTile(
-                icon: Icons.block,
-                label: 'Blocked Profiles',
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const BlockedProfilesScreen()),
-                ),
-              ),
-              _buildSettingsNavTile(
-                icon: Icons.verified_user,
-                label: 'Verify Yourself',
-                subtitle: 'Verify yourself to get more matches and connection from Delulus.',
-                trailingText: _isVerified ? 'VERIFIED' : 'PENDING',
-                trailingStyle: GoogleFonts.inter(
-                  fontSize: 10,
-                  fontWeight: FontWeight.w800,
-                  color: _isVerified ? Colors.greenAccent : AppColors.primary,
-                ),
-                onTap: _handleVerification,
-              ),
-              const SizedBox(height: 48),
-
-              Center(
-                child: Column(
-                  children: [
-                    _buildLogoutButton(),
-                    const SizedBox(height: 32),
-                    Text(
-                      'Delulu v$_appVersion',
-                      style: GoogleFonts.inter(
-                        fontSize: 12,
-                        color: AppColors.onSurfaceVariant.withValues(alpha: 0.7),
-                        letterSpacing: 1,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
               const SizedBox(height: 40),
             ],
           ),
@@ -947,6 +536,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             controller: controller,
             keyboardType: keyboardType,
             style: const TextStyle(color: Colors.white, fontSize: 16),
+            scrollPadding: const EdgeInsets.only(bottom: 150),
             decoration: InputDecoration(
               hintText: hint,
               hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.3)),
@@ -976,6 +566,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             controller: controller,
             maxLines: 4,
             style: const TextStyle(color: Colors.white),
+            scrollPadding: const EdgeInsets.only(bottom: 150),
             decoration: InputDecoration(
               hintText: hint,
               hintStyle: const TextStyle(color: Colors.white24),
@@ -985,76 +576,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           ),
         ),
       ],
-    );
-  }
-
-  Widget _buildSettingsNavTile({
-    required IconData icon,
-    required String label,
-    String? subtitle,
-    String? trailingText,
-    TextStyle? trailingStyle,
-    VoidCallback? onTap,
-  }) {
-    return ListTile(
-      onTap: onTap,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      leading: Icon(icon, color: AppColors.primary),
-      title: Text(label, style: GoogleFonts.beVietnamPro(fontSize: 15, fontWeight: FontWeight.w600, color: Colors.white)),
-      subtitle: subtitle != null ? Text(subtitle, style: GoogleFonts.inter(fontSize: 11, color: AppColors.onSurfaceVariant.withValues(alpha: 0.8))) : null,
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (trailingText != null) Text(trailingText, style: trailingStyle),
-          const SizedBox(width: 8),
-          const Icon(Icons.chevron_right, color: Colors.white24, size: 20),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildToggleTile({
-    required IconData icon,
-    required String label,
-    String? subtitle,
-    required bool value,
-    required Function(bool) onChanged,
-    bool isPremium = false,
-  }) {
-    final bool showLock = isPremium && !_isPremium;
-    
-    return ListTile(
-      leading: Icon(icon, color: showLock ? Colors.white24 : AppColors.primary),
-      title: Row(
-        children: [
-          Text(label, style: GoogleFonts.beVietnamPro(fontSize: 15, fontWeight: FontWeight.w600, color: showLock ? Colors.white38 : Colors.white)),
-          if (showLock) ...[
-            const SizedBox(width: 8),
-            const Icon(Icons.star, color: Color(0xFF8B5CF6), size: 14),
-          ],
-        ],
-      ),
-      subtitle: subtitle != null ? Text(subtitle, style: GoogleFonts.inter(fontSize: 11, color: AppColors.onSurfaceVariant.withValues(alpha: 0.8))) : null,
-      trailing: Switch(
-        value: value,
-        onChanged: onChanged,
-        activeColor: AppColors.primary,
-        inactiveTrackColor: showLock ? Colors.white10 : null,
-      ),
-    );
-  }
-
-  Widget _buildLogoutButton() {
-    return OutlinedButton.icon(
-      onPressed: _showLogoutDialog,
-      icon: const Icon(Icons.logout, size: 18),
-      label: const Text('LOGOUT', style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1)),
-      style: OutlinedButton.styleFrom(
-        foregroundColor: AppColors.error,
-        side: const BorderSide(color: AppColors.error),
-        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      ),
     );
   }
 

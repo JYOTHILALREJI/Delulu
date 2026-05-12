@@ -78,6 +78,7 @@ class _LoginScreenState extends State<LoginScreen> {
     return GestureDetector(
       onTap: () => FocusScope.of(context).unfocus(),
       child: Scaffold(
+        resizeToAvoidBottomInset: true,
         body: Container(
           decoration: const BoxDecoration(
             gradient: RadialGradient(
@@ -400,6 +401,7 @@ class _LoginScreenState extends State<LoginScreen> {
           fontSize: 15,
           color: AppColors.onSurface,
         ),
+        scrollPadding: const EdgeInsets.only(bottom: 150),
         decoration: InputDecoration(
           hintText: hint,
           hintStyle: GoogleFonts.beVietnamPro(

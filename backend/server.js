@@ -165,6 +165,12 @@ io.on('connection', async (socket) => {
       );
       const sessionId = res.rows[0].id;
 
+      // Create a status message in the chat
+      const msgRes = await db.query(
+        'INSERT INTO messages (channel_id, sender_id, content, message_type) VALUES ($1, $2, $3, $4) RETURNING *',
+        [channelId, userId, JSON.stringify({ sessionId, status: 'pending', gameId, gameName }), 'game_status']
+      );
+
       socket.emit('game_invite_sent', { sessionId, fromName, ...data });
 
       io.to(peerId.toString()).emit('game_invite_received', {
@@ -173,6 +179,45 @@ io.on('connection', async (socket) => {
         fromName,
         fromId: userId
       });
+
+      // Broadcast new message to both
+      io.to(userId.toString()).to(peerId.toString()).emit('new_message', msgRes.rows[0]);
+
+      // Auto-cancel if not responded within 2 minutes
+      setTimeout(async () => {
+        try {
+          const checkRes = await db.query('SELECT status FROM game_sessions WHERE id = $1', [sessionId]);
+          if (checkRes.rows.length > 0 && checkRes.rows[0].status === 'pending') {
+            await db.query(
+              'UPDATE game_sessions SET status = $1, updated_at = NOW() WHERE id = $2',
+              ['missed', sessionId]
+            );
+
+            // Update original invitation message
+            const originalMsgRes = await db.query(
+              "SELECT id, content FROM messages WHERE channel_id = $1 AND message_type = 'game_status' AND content->>'sessionId' = $2",
+              [channelId, sessionId]
+            );
+
+            if (originalMsgRes.rows.length > 0) {
+              const msgId = originalMsgRes.rows[0].id;
+              const newContent = JSON.parse(JSON.stringify(originalMsgRes.rows[0].content));
+              newContent.status = 'missed';
+              
+              const updatedMsgRes = await db.query(
+                'UPDATE messages SET content = $1 WHERE id = $2 RETURNING *',
+                [JSON.stringify(newContent), msgId]
+              );
+
+              io.to(userId.toString()).to(peerId.toString()).emit('message_updated', updatedMsgRes.rows[0]);
+            }
+
+            io.to(userId.toString()).to(peerId.toString()).emit('game_invite_missed', { sessionId });
+          }
+        } catch (err) {
+          console.error('Auto-cancel error:', err);
+        }
+      }, 2 * 60 * 1000); // 2 minutes
     } catch (err) {
       console.error('Game invite error:', err);
     }
@@ -193,7 +238,27 @@ io.on('connection', async (socket) => {
         [status, sessionId]
       );
 
-      // Create a status message in the chat
+      // Find the original invitation message and update its status
+      const originalMsgRes = await db.query(
+        "SELECT id, content FROM messages WHERE channel_id = $1 AND message_type = 'game_status' AND content->>'sessionId' = $2",
+        [channelId, sessionId]
+      );
+
+      if (originalMsgRes.rows.length > 0) {
+        const msgId = originalMsgRes.rows[0].id;
+        const newContent = JSON.parse(JSON.stringify(originalMsgRes.rows[0].content));
+        newContent.status = status;
+        
+        const updatedMsgRes = await db.query(
+          'UPDATE messages SET content = $1 WHERE id = $2 RETURNING *',
+          [JSON.stringify(newContent), msgId]
+        );
+
+        // Notify both users about the updated message status
+        io.to(userId.toString()).to(peerId.toString()).emit('message_updated', updatedMsgRes.rows[0]);
+      }
+
+      // Create a NEW status message in the chat for the response
       const msgRes = await db.query(
         'INSERT INTO messages (channel_id, sender_id, content, message_type) VALUES ($1, $2, $3, $4) RETURNING *',
         [channelId, userId, JSON.stringify({ sessionId, status, gameId, gameName }), 'game_status']
@@ -205,7 +270,7 @@ io.on('connection', async (socket) => {
         fromId: userId
       });
 
-      // Broadcast new message to both
+      // Broadcast new status message to both
       io.to(userId.toString()).to(peerId.toString()).emit('new_message', msgRes.rows[0]);
     } catch (err) {
       console.error('Game response error:', err);
@@ -251,6 +316,141 @@ io.on('connection', async (socket) => {
     }
   });
 
+  // --- Advanced Truth or Dare Game Logic ---
+  const activeTimers = new Map();
+
+  socket.on('select_choice', async ({ sessionId, choice, peerId }) => {
+    try {
+      const res = await db.query('SELECT state FROM game_sessions WHERE id = $1', [sessionId]);
+      if (res.rows.length === 0) return;
+
+      const state = res.rows[0].state || {};
+      state.category = choice;
+      state.phase = 'selecting_question';
+      state.currentTurn = peerId; // The OTHER player now picks the question
+      state.targetId = userId; // The person who chose the category is the one who will answer
+      
+      await db.query('UPDATE game_sessions SET state = $1, updated_at = NOW() WHERE id = $2', [JSON.stringify(state), sessionId]);
+      io.to(userId.toString()).to(peerId.toString()).emit('game_state_synced', { sessionId, state });
+      
+      const channelRes = await db.query('SELECT channel_id FROM game_sessions WHERE id = $1', [sessionId]);
+      const channelId = channelRes.rows[0]?.channel_id;
+
+      const msgRes = await db.query(
+        'INSERT INTO messages (channel_id, sender_id, content, message_type) VALUES ($1, $2, $3, $4) RETURNING *',
+        [channelId, userId, JSON.stringify({ sessionId, text: `Selected ${choice.toUpperCase()}`, type: 'info' }), 'game_status']
+      );
+      io.to(userId.toString()).to(peerId.toString()).emit('new_message', msgRes.rows[0]);
+    } catch (err) { console.error(err); }
+  });
+
+  socket.on('send_question', async ({ sessionId, question, peerId }) => {
+    try {
+      const res = await db.query('SELECT state FROM game_sessions WHERE id = $1', [sessionId]);
+      if (res.rows.length === 0) return;
+
+      const state = res.rows[0].state || {};
+      state.question = question;
+      state.phase = 'answering';
+      state.currentTurn = peerId; // Back to the target to answer
+      
+      await db.query('UPDATE game_sessions SET state = $1, updated_at = NOW() WHERE id = $2', [JSON.stringify(state), sessionId]);
+      io.to(userId.toString()).to(peerId.toString()).emit('game_state_synced', { sessionId, state });
+
+      const channelRes = await db.query('SELECT channel_id FROM game_sessions WHERE id = $1', [sessionId]);
+      const channelId = channelRes.rows[0]?.channel_id;
+      const msgRes = await db.query(
+        'INSERT INTO messages (channel_id, sender_id, content, message_type) VALUES ($1, $2, $3, $4) RETURNING *',
+        [channelId, userId, question, 'text']
+      );
+      io.to(userId.toString()).to(peerId.toString()).emit('new_message', msgRes.rows[0]);
+
+      if (activeTimers.has(sessionId)) clearTimeout(activeTimers.get(sessionId));
+      const timeout = setTimeout(async () => {
+        try {
+          const checkRes = await db.query('SELECT state FROM game_sessions WHERE id = $1', [sessionId]);
+          const currentState = checkRes.rows[0]?.state || {};
+          if (currentState.phase === 'answering') {
+            currentState.phase = 'selecting_category';
+            currentState.currentTurn = userId; // Original asker gets to choose next or same target gets another go?
+            // Switch roles: Target who failed now becomes asker? Or other way?
+            // Usually if you fail, the other person gets the choice.
+            await db.query('UPDATE game_sessions SET state = $1, updated_at = NOW() WHERE id = $2', [JSON.stringify(currentState), sessionId]);
+            io.to(userId.toString()).to(peerId.toString()).emit('game_state_synced', { sessionId, state: currentState });
+          }
+        } catch (e) { console.error(e); }
+      }, 90000);
+      activeTimers.set(sessionId, timeout);
+    } catch (err) { console.error(err); }
+  });
+
+  socket.on('submit_answer', async ({ sessionId, answer, peerId, messageType, duration }) => {
+    try {
+      if (activeTimers.has(sessionId)) {
+        clearTimeout(activeTimers.get(sessionId));
+        activeTimers.delete(sessionId);
+      }
+
+      const res = await db.query('SELECT state FROM game_sessions WHERE id = $1', [sessionId]);
+      if (res.rows.length === 0) return;
+
+      const state = res.rows[0].state || {};
+      state.phase = 'selecting_category';
+      state.currentTurn = userId; // The person who just answered now gets to choose the next category for the other person
+      // Role swap happens here.
+      
+      await db.query('UPDATE game_sessions SET state = $1, updated_at = NOW() WHERE id = $2', [JSON.stringify(state), sessionId]);
+      
+      const channelRes = await db.query('SELECT channel_id FROM game_sessions WHERE id = $1', [sessionId]);
+      const channelId = channelRes.rows[0]?.channel_id;
+      const msgRes = await db.query(
+        'INSERT INTO messages (channel_id, sender_id, content, message_type, duration) VALUES ($1, $2, $3, $4, $5) RETURNING *',
+        [channelId, userId, answer, messageType, duration]
+      );
+      io.to(userId.toString()).to(peerId.toString()).emit('new_message', msgRes.rows[0]);
+      io.to(userId.toString()).to(peerId.toString()).emit('game_state_synced', { sessionId, state });
+    } catch (err) { console.error(err); }
+  });
+
+  socket.on('game_state_update', async (data) => {
+    // data: { sessionId, state, peerId }
+    const { sessionId, state, peerId } = data;
+    try {
+      await db.query(
+        'UPDATE game_sessions SET state = $1, updated_at = NOW() WHERE id = $2',
+        [JSON.stringify(state), sessionId]
+      );
+      io.to(peerId.toString()).emit('game_state_synced', { sessionId, state });
+    } catch (err) {
+      console.error('Game state update error:', err);
+    }
+  });
+
+  socket.on('game_point_update', async (data) => {
+    // data: { sessionId, userId, points, peerId }
+    const { sessionId, userId: targetUserId, points, peerId } = data;
+    try {
+      const currentPointsRes = await db.query('SELECT match_points FROM profiles WHERE user_id = $1', [targetUserId]);
+      let currentPoints = currentPointsRes.rows[0]?.match_points || 0;
+      let newPoints = currentPoints + points;
+      if (newPoints < 0) newPoints = 0;
+
+      await db.query(
+        'UPDATE profiles SET match_points = $1 WHERE user_id = $2',
+        [newPoints, targetUserId]
+      );
+
+      io.to(targetUserId.toString()).to(peerId.toString()).emit('game_points_synced', { 
+        sessionId, 
+        userId: targetUserId, 
+        points: newPoints,
+        delta: points
+      });
+    } catch (err) {
+      console.error('Game point update error:', err);
+    }
+  });
+
   socket.on('game_session_update', async (data) => {
     // data: { sessionId, duration }
     const { sessionId, duration } = data;
@@ -261,6 +461,31 @@ io.on('connection', async (socket) => {
       );
     } catch (err) {
       console.error('Game session update error:', err);
+    }
+  });
+
+  socket.on('game_end', async (data) => {
+    // data: { sessionId, peerId, channelId }
+    const { sessionId, peerId, channelId } = data;
+    try {
+      await db.query(
+        'UPDATE game_sessions SET status = $1, updated_at = NOW() WHERE id = $2',
+        ['completed', sessionId]
+      );
+
+      const sessionCheck = await db.query('SELECT game_id, game_name FROM game_sessions WHERE id = $1', [sessionId]);
+      const gameId = sessionCheck.rows[0]?.game_id;
+      const gameName = sessionCheck.rows[0]?.game_name;
+
+      const msgRes = await db.query(
+        'INSERT INTO messages (channel_id, sender_id, content, message_type) VALUES ($1, $2, $3, $4) RETURNING *',
+        [channelId, userId, JSON.stringify({ sessionId, status: 'completed', gameId, gameName }), 'game_status']
+      );
+
+      io.to(peerId.toString()).emit('game_ended_by_peer', { sessionId });
+      io.to(userId.toString()).to(peerId.toString()).emit('new_message', msgRes.rows[0]);
+    } catch (err) {
+      console.error('Game end error:', err);
     }
   });
 
@@ -284,6 +509,7 @@ app.use(cors({
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
+
 app.use(express.json({ limit: '50mb' }));
 
 // ── Routes ──

@@ -23,12 +23,15 @@ void main() {
   runApp(const DeluluApp());
 }
 
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+
 class DeluluApp extends StatelessWidget {
   const DeluluApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: navigatorKey,
       title: 'Delulu',
       debugShowCheckedModeBanner: false,
       theme: ThemeData.dark().copyWith(

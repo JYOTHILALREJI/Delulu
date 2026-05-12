@@ -45,6 +45,7 @@ router.get('/connections', authMiddleware, async (req, res) => {
             [userId]
         );
 
+
         const connections = result.rows.map(row => {
             const parseJson = (val) => {
                 if (!val) return [];
@@ -165,8 +166,9 @@ router.get('/messages/:channelId', authMiddleware, async (req, res) => {
                     rm.message_type as reply_to_message_type,
                     p_peer.read_receipt_enabled as peer_read_receipt_enabled
              FROM messages m
+             JOIN channels c ON m.channel_id = c.id
              LEFT JOIN messages rm ON m.reply_to_id = rm.id
-             JOIN profiles p_peer ON (CASE WHEN m.sender_id = $2 THEN (SELECT CASE WHEN user1_id = $2 THEN user2_id ELSE user1_id END FROM channels WHERE id = $1) ELSE m.sender_id END) = p_peer.user_id
+             JOIN profiles p_peer ON (CASE WHEN m.sender_id = $2 THEN (CASE WHEN c.user1_id = $2 THEN c.user2_id ELSE c.user1_id END) ELSE m.sender_id END) = p_peer.user_id
              WHERE m.channel_id = $1
              ORDER BY m.created_at DESC
              LIMIT 200`,

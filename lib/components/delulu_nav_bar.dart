@@ -82,17 +82,18 @@ class _DeluluNavBarState extends State<DeluluNavBar> {
       child: Container(
         margin: const EdgeInsets.only(left: 12, right: 12, bottom: 8),   // slightly smaller margins
         decoration: BoxDecoration(
-          color: Colors.black.withValues(alpha: 0.6),
+          color: const Color(0xFF1A1A1A).withValues(alpha: 0.85),
           borderRadius: BorderRadius.circular(24),
-          border: Border(
-            top: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
+          border: Border.all(
+            color: Colors.white.withValues(alpha: 0.12),
+            width: 0.8,
           ),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.5),
-              blurRadius: 20,
+              color: Colors.black.withValues(alpha: 0.4),
+              blurRadius: 25,
               spreadRadius: 2,
-              offset: const Offset(0, -3),
+              offset: const Offset(0, 5),
             ),
           ],
         ),

@@ -107,10 +107,13 @@ router.get('/me', authMiddleware, async (req, res) => {
               p.display_name AS profile_name, p.age, p.gender, p.interested_in, p.bio, p.interests, p.photos,
               p.online_status_enabled, p.typing_indicator_enabled, p.last_seen_enabled, p.read_receipt_enabled,
               p.latitude, p.longitude, p.live_location_enabled, p.location_name,
-              p.is_premium, p.last_attention_seeker_at
+              p.is_premium, p.last_attention_seeker_at,
+              s.plan_id AS subscription_plan, s.expiry_date AS subscription_expiry
        FROM users u
        LEFT JOIN profiles p ON p.user_id = u.id
-       WHERE u.id = $1`,
+       LEFT JOIN subscriptions s ON s.user_id = u.id AND s.expiry_date > NOW()
+       WHERE u.id = $1
+       ORDER BY s.expiry_date DESC NULLS LAST LIMIT 1`,
       [req.userId]
     );
 
@@ -183,6 +186,8 @@ router.get('/me', authMiddleware, async (req, res) => {
         location_name: row.location_name,
         is_premium: row.is_premium,
         last_attention_seeker_at: row.last_attention_seeker_at,
+        subscription_plan: row.subscription_plan,
+        subscription_expiry: row.subscription_expiry,
         connect_count: connectCount,
         likes_count: likesCount,
         aura_score: auraScore
@@ -268,6 +273,59 @@ router.get('/notifications', authMiddleware, async (req, res) => {
     });
   } catch (err) {
     console.error('Notification counts error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ── Delete Account ──
+router.delete('/delete-account', authMiddleware, async (req, res) => {
+  const client = await db.pool.connect();
+  try {
+    await client.query('BEGIN');
+    // CASCADE deletes on profiles, likes, connection_requests etc. handled by DB constraints
+    // Manually clean up tables without FK cascade to users
+    await client.query('DELETE FROM subscriptions WHERE user_id = $1', [req.userId]);
+    await client.query('DELETE FROM likes WHERE liker_id = $1 OR liked_user_id = $1', [req.userId]);
+    await client.query('DELETE FROM connection_requests WHERE sender_id = $1 OR receiver_id = $1', [req.userId]);
+    await client.query('DELETE FROM profiles WHERE user_id = $1', [req.userId]);
+    await client.query('DELETE FROM users WHERE id = $1', [req.userId]);
+    await client.query('COMMIT');
+    res.json({ success: true, message: 'Account deleted successfully' });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Delete account error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  } finally {
+    client.release();
+  }
+});
+
+// ── Get Account Data ──
+router.get('/account-data', authMiddleware, async (req, res) => {
+  try {
+    const userResult = await db.query(
+      `SELECT u.id, u.email, u.display_name, u.is_onboarded, u.created_at, u.is_verified,
+              p.display_name AS profile_name, p.age, p.gender, p.interested_in, p.bio,
+              p.interests, p.photos, p.location_name, p.is_premium, p.premium_since
+       FROM users u
+       LEFT JOIN profiles p ON p.user_id = u.id
+       WHERE u.id = $1`,
+      [req.userId]
+    );
+    const subsResult = await db.query(
+      'SELECT plan_id, store, expiry_date, created_at FROM subscriptions WHERE user_id = $1 ORDER BY created_at DESC',
+      [req.userId]
+    );
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    res.json({
+      exported_at: new Date().toISOString(),
+      user: userResult.rows[0],
+      subscriptions: subsResult.rows,
+    });
+  } catch (err) {
+    console.error('Account data error:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

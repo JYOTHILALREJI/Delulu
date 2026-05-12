@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -387,5 +388,45 @@ class ApiService {
     } catch (_) {
       return {};
     }
+  }
+
+  // ── Account Management Endpoints ──
+  static Future<http.Response> deleteAccount() async {
+    final headers = await authHeaders();
+    return _client
+        .delete(Uri.parse('$baseUrl/auth/delete-account'), headers: headers)
+        .timeout(_timeout);
+  }
+
+  static Future<http.Response> getAccountData() async {
+    final headers = await authHeaders();
+    return _client
+        .get(Uri.parse('$baseUrl/auth/account-data'), headers: headers)
+        .timeout(_timeout);
+  }
+
+  static Future<http.Response> getPaymentHistory() async {
+    final headers = await authHeaders();
+    return _client
+        .get(Uri.parse('$baseUrl/premium/payment-history'), headers: headers)
+        .timeout(_timeout);
+  }
+
+  static Future<http.Response> uploadAudio(File file) async {
+    final token = await getToken();
+    final uri = Uri.parse('$baseUrl/whispers/upload-audio');
+    final request = http.MultipartRequest('POST', uri);
+    
+    if (token != null) {
+      request.headers['Authorization'] = 'Bearer $token';
+    }
+    
+    request.files.add(await http.MultipartFile.fromPath(
+      'audio',
+      file.path,
+    ));
+    
+    final streamedResponse = await request.send();
+    return http.Response.fromStream(streamedResponse);
   }
 }

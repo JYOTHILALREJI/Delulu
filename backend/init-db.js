@@ -224,6 +224,7 @@ async function initDb() {
         game_name VARCHAR(100) NOT NULL,
         status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'rejected', 'cancelled', 'missed', 'completed')),
         duration INTEGER DEFAULT 0,
+        state JSONB DEFAULT '{}'::jsonb,
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );

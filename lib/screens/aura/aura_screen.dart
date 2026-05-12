@@ -14,6 +14,7 @@ import 'package:geocoding/geocoding.dart';
 import 'dart:math';
 import 'edit_profile_screen.dart';
 import 'blocked_profiles_screen.dart';
+import 'settings_screen.dart';
 import '../premium/subscription_screen.dart';
 import '../../components/delulu_wavy_loader.dart';
 
@@ -290,48 +291,44 @@ class AuraScreenState extends State<AuraScreen> {
                       constraints: BoxConstraints(minHeight: constraints.maxHeight),
                       child: IntrinsicHeight(
                         child: Padding(
-                          padding: const EdgeInsets.fromLTRB(20, 20, 20, 100),
+                          padding: const EdgeInsets.fromLTRB(20, 20, 20, 110),
                           child: Column(
-                            children: [
-                              _buildAuraTitle(),
-                              const Spacer(),
-                              const SizedBox(height: 32),
-                  
-                  // Glass Card for Profile Details
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(32),
-                    child: BackdropFilter(
-                      filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.08),
-                          borderRadius: BorderRadius.circular(32),
-                          border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
-                        ),
-                        child: Column(
+                            mainAxisAlignment: MainAxisAlignment.start,
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            _buildProfileHeader(displayName, age),
-                            const SizedBox(height: 20),
-                            
-                            _buildStatsSection(
-                              connections: _profile?['connect_count'] ?? 0,
-                              likes: _profile?['likes_count'] ?? 0,
-                              auraScore: _profile?['aura_score'] ?? 0,
-                            ),
-                            
-                            const SizedBox(height: 20),
-                            _buildBioSection(bio),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                              const SizedBox(height: 16),
+                            _buildAuraTitle(),
+                            const Spacer(),
+                              
+                              // Glass Card for Profile Details
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(32),
+                                child: BackdropFilter(
+                                  filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
+                                  child: Container(
+                                    padding: const EdgeInsets.all(24),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white.withValues(alpha: 0.08),
+                                      borderRadius: BorderRadius.circular(32),
+                                      border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+                                    ),
+                                    child: Column(
+                                      children: [
+                                        _buildProfileHeader(displayName, age),
+                                        const SizedBox(height: 20),
+                                        _buildStatsSection(
+                                          connections: _profile?['connect_count'] ?? 0,
+                                          likes: _profile?['likes_count'] ?? 0,
+                                          auraScore: _profile?['aura_score'] ?? 0,
+                                        ),
+                                        const SizedBox(height: 20),
+                                        _buildBioSection(bio),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 24),
                               _buildRizzPlusBanner(),
-                              const SizedBox(height: 16),
-                              _buildEditProfileButton(),
-                              const SizedBox(height: 8),
                             ],
                           ),
                         ),
@@ -348,20 +345,58 @@ class AuraScreenState extends State<AuraScreen> {
   }
 
   Widget _buildAuraTitle() {
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: Text(
-        'Your Aura',
-        style: GoogleFonts.beVietnamPro(
-          fontSize: 28,
-          fontWeight: FontWeight.w800,
-          color: Colors.white,
-          letterSpacing: -1,
-          shadows: [
-            Shadow(color: Colors.black.withValues(alpha: 0.5), blurRadius: 10, offset: const Offset(0, 2)),
-          ],
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(
+          'Your Aura',
+          style: GoogleFonts.beVietnamPro(
+            fontSize: 28,
+            fontWeight: FontWeight.w800,
+            color: Colors.white,
+            letterSpacing: -1,
+            shadows: [
+              Shadow(color: Colors.black.withValues(alpha: 0.5), blurRadius: 10, offset: const Offset(0, 2)),
+            ],
+          ),
         ),
-      ),
+        GestureDetector(
+          onTap: () {
+            if (_profile != null) {
+              Navigator.push(
+                context,
+                PageRouteBuilder(
+                  pageBuilder: (context, animation, secondary) =>
+                      SettingsScreen(profile: _profile!),
+                  transitionsBuilder: (context, animation, secondary, child) {
+                    return SlideTransition(
+                      position: Tween<Offset>(
+                        begin: const Offset(1.0, 0.0),
+                        end: Offset.zero,
+                      ).animate(CurvedAnimation(
+                        parent: animation,
+                        curve: Curves.fastLinearToSlowEaseIn,
+                      )),
+                      child: child,
+                    );
+                  },
+                  transitionDuration: const Duration(milliseconds: 500),
+                ),
+              ).then((_) => loadProfile());
+            }
+          },
+          child: Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
+            ),
+            child: const Icon(Icons.settings_rounded, color: Colors.white, size: 22),
+          ),
+        ),
+      ],
     );
   }
 
@@ -466,128 +501,44 @@ class AuraScreenState extends State<AuraScreen> {
           ],
         ),
         const SizedBox(height: 12),
-        AnimatedSize(
-          duration: const Duration(milliseconds: 300),
-          alignment: Alignment.topCenter,
-          curve: Curves.easeInOut,
-          child: GestureDetector(
-            onTap: () {
-              if (bio.length > 80) {
-                setState(() {
-                  _isBioExpanded = !_isBioExpanded;
-                });
-              }
-            },
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  bio,
-                  maxLines: _isBioExpanded ? null : 2,
-                  overflow: _isBioExpanded ? null : TextOverflow.ellipsis,
-                  style: GoogleFonts.inter(
-                    fontSize: 15,
-                    color: Colors.white.withValues(alpha: 0.9),
-                    height: 1.6,
-                  ),
-                  textAlign: TextAlign.left,
+        GestureDetector(
+          onTap: () {
+            if (bio.length > 80) {
+              setState(() {
+                _isBioExpanded = !_isBioExpanded;
+              });
+            }
+          },
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                bio,
+                maxLines: _isBioExpanded ? null : 2,
+                overflow: _isBioExpanded ? null : TextOverflow.ellipsis,
+                style: GoogleFonts.inter(
+                  fontSize: 15,
+                  color: Colors.white.withValues(alpha: 0.9),
+                  height: 1.6,
                 ),
-                if (!_isBioExpanded && bio.length > 80)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 4),
-                    child: Text(
-                      'Read more',
-                      style: GoogleFonts.inter(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.primary.withValues(alpha: 0.8),
-                      ),
+                textAlign: TextAlign.left,
+              ),
+              if (!_isBioExpanded && bio.length > 80)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    'Read more',
+                    style: GoogleFonts.inter(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.primary.withValues(alpha: 0.8),
                     ),
                   ),
-              ],
-            ),
+                ),
+            ],
           ),
         ),
       ],
-    );
-  }
-
-  Widget _buildEditProfileButton() {
-    return Container(
-      width: double.infinity,
-      height: 60,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(20),
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            AppColors.tertiaryContainer,
-            AppColors.primaryContainer,
-          ],
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.primaryContainer.withValues(alpha: 0.3),
-            blurRadius: 28,
-            offset: const Offset(0, 8),
-          ),
-        ],
-      ),
-      child: ElevatedButton(
-        onPressed: () {
-          if (_profile != null) {
-            Navigator.push(
-              context,
-              PageRouteBuilder(
-                pageBuilder: (context, animation, secondaryAnimation) =>
-                    EditProfileScreen(profile: _profile!),
-                transitionsBuilder: (context, animation, secondaryAnimation, child) {
-                  const begin = Offset(0.0, 1.0);
-                  const end = Offset.zero;
-                  const curve = Curves.fastLinearToSlowEaseIn;
-
-                  var tween = Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
-                  var offsetAnimation = animation.drive(tween);
-
-                  return SlideTransition(
-                    position: offsetAnimation,
-                    child: FadeTransition(
-                      opacity: animation,
-                      child: child,
-                    ),
-                  );
-                },
-                transitionDuration: const Duration(milliseconds: 600),
-                reverseTransitionDuration: const Duration(milliseconds: 500),
-              ),
-            ).then((_) {
-              loadProfile();
-            });
-          }
-        },
-        style: ElevatedButton.styleFrom(
-          backgroundColor: Colors.transparent,
-          shadowColor: Colors.transparent,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.edit_note, color: Colors.white, size: 24),
-            const SizedBox(width: 8),
-            Text(
-              'EDIT PROFILE',
-              style: GoogleFonts.beVietnamPro(
-                fontSize: 14,
-                fontWeight: FontWeight.w800,
-                letterSpacing: 2,
-                color: Colors.white,
-              ),
-            ),
-          ],
-        ),
-      ),
     );
   }
 
@@ -663,70 +614,4 @@ class AuraScreenState extends State<AuraScreen> {
     );
   }
 
-  Widget _buildSettingsGroup(String title, List<Widget> children) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.only(left: 4, bottom: 8),
-          child: Text(
-            title.toUpperCase(),
-            style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 1.5, color: AppColors.primary),
-          ),
-        ),
-        Container(
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.05),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
-          ),
-          child: Column(children: children),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildToggleTile({
-    required IconData icon,
-    required String label,
-    String? subtitle,
-    required bool value,
-    required Function(bool) onChanged,
-  }) {
-    return ListTile(
-      leading: Icon(icon, color: AppColors.primary),
-      title: Text(label, style: GoogleFonts.beVietnamPro(fontSize: 15, fontWeight: FontWeight.w500)),
-      subtitle: subtitle != null ? Text(subtitle, style: GoogleFonts.inter(fontSize: 11, color: AppColors.onSurfaceVariant)) : null,
-      trailing: Switch(
-        value: value,
-        onChanged: onChanged,
-        activeColor: AppColors.primary,
-      ),
-    );
-  }
-
-  Widget _buildNavTile({
-    required IconData icon,
-    required String label,
-    String? subtitle,
-    String? trailing,
-    TextStyle? trailingStyle,
-    Color? color,
-    VoidCallback? onTap,
-  }) {
-    return ListTile(
-      onTap: onTap,
-      leading: Icon(icon, color: color ?? AppColors.primary),
-      title: Text(label, style: GoogleFonts.beVietnamPro(fontSize: 15, fontWeight: FontWeight.w500, color: color)),
-      subtitle: subtitle != null ? Text(subtitle, style: GoogleFonts.inter(fontSize: 11, color: AppColors.onSurfaceVariant)) : null,
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (trailing != null) Text(trailing, style: trailingStyle),
-          const SizedBox(width: 4),
-          Icon(Icons.chevron_right, size: 20, color: AppColors.onSurfaceVariant.withValues(alpha: 0.5)),
-        ],
-      ),
-    );
-  }
 }

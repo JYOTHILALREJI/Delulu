@@ -59,7 +59,6 @@ class _VisionBoardScreenState extends State<VisionBoardScreen> {
 
   Future<void> _savePhotos() async {
     try {
-      debugPrint('Saving photos: ${jsonEncode(_photos)}');
       final res = await ApiService.saveProfile({'photos': _photos});
       if (res.statusCode == 200) {
         if (mounted) {

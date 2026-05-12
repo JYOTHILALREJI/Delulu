@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_colors.dart';
 import '../services/socket_service.dart';
 import '../screens/whisper/game_screen.dart';
+import '../main.dart';
 
 class GameInviteGlobalWrapper extends StatefulWidget {
   final Widget child;
@@ -16,6 +17,7 @@ class GameInviteGlobalWrapper extends StatefulWidget {
 
 class _GameInviteGlobalWrapperState extends State<GameInviteGlobalWrapper> {
   StreamSubscription? _inviteSub;
+  StreamSubscription? _missedSub;
   Map<String, dynamic>? _currentInvite;
   Timer? _autoDismissTimer;
 
@@ -34,11 +36,18 @@ class _GameInviteGlobalWrapperState extends State<GameInviteGlobalWrapper> {
         });
       }
     });
+
+    _missedSub = SocketService().gameMissedStream.listen((data) {
+      if (mounted && _currentInvite != null && _currentInvite!['sessionId'] == data['sessionId']) {
+        setState(() => _currentInvite = null);
+      }
+    });
   }
 
   @override
   void dispose() {
     _inviteSub?.cancel();
+    _missedSub?.cancel();
     _autoDismissTimer?.cancel();
     super.dispose();
   }
@@ -60,8 +69,8 @@ class _GameInviteGlobalWrapperState extends State<GameInviteGlobalWrapper> {
       // Navigate to GameScreen
       // Since we are in the global builder, we might need a navigator key or use the context from child
       // But for now, let's just use the current context if possible
-      Navigator.push(
-        context,
+      // Navigate to GameScreen using global navigatorKey
+      navigatorKey.currentState?.push(
         MaterialPageRoute(
           builder: (_) => GameScreen(
             gameId: invite['gameId'],
