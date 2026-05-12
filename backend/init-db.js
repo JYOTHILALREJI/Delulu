@@ -107,7 +107,7 @@ async function initDb() {
         ALTER TABLE messages ADD COLUMN IF NOT EXISTS message_type VARCHAR(20) DEFAULT 'text';
         ALTER TABLE messages ADD COLUMN IF NOT EXISTS duration INTEGER;
       `);
-    } catch (e) {}
+    } catch (e) { }
 
     // Add missing columns if upgrading existing db
     const profileColumns = [
@@ -156,7 +156,7 @@ async function initDb() {
             ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarding_step INTEGER DEFAULT 0;
           `);
       console.log('  ✓ updated users table columns');
-    } catch (e) {}
+    } catch (e) { }
 
     // Blocks table
     await client.query(`
@@ -188,8 +188,10 @@ async function initDb() {
         id VARCHAR(50) PRIMARY KEY,
         name VARCHAR(100) NOT NULL,
         icon VARCHAR(50),
+        image_url TEXT,
         description TEXT,
-        min_messages_required INTEGER DEFAULT 200,
+        category VARCHAR(50) DEFAULT 'fun',
+        min_messages_required INTEGER DEFAULT 20,
         daily_free_plays INTEGER DEFAULT 3,
         unlimited_with_subscription BOOLEAN DEFAULT TRUE,
         is_premium BOOLEAN DEFAULT FALSE,
@@ -198,7 +200,86 @@ async function initDb() {
         created_at TIMESTAMPTZ DEFAULT NOW()
       );
     `);
+    // Add new columns if they don't exist (migration safety)
+    await client.query(`ALTER TABLE games ADD COLUMN IF NOT EXISTS image_url TEXT;`);
+    await client.query(`ALTER TABLE games ADD COLUMN IF NOT EXISTS category VARCHAR(50) DEFAULT 'fun';`);
     console.log('  ✓ games');
+
+    // Truth questions table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS truth_questions (
+        id SERIAL PRIMARY KEY,
+        content TEXT NOT NULL,
+        difficulty VARCHAR(20) DEFAULT 'medium',
+        is_active BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
+    console.log('  ✓ truth_questions');
+
+    // Dare questions table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS dare_questions (
+        id SERIAL PRIMARY KEY,
+        content TEXT NOT NULL,
+        difficulty VARCHAR(20) DEFAULT 'medium',
+        is_active BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
+    console.log('  ✓ dare_questions');
+
+    // Seed Truth Questions
+    await client.query(`
+      INSERT INTO truth_questions (content) VALUES 
+      ('Tell me about your most unforgettable crush.'),
+      ('Describe your ideal partner using only your voice.'),
+      ('What’s something you’ve always wanted to confess to someone?'),
+      ('Tell the story of your most awkward date.'),
+      ('What’s one thing that instantly makes you fall for someone?'),
+      ('Describe your perfect kiss in detail.'),
+      ('What’s your biggest relationship fear?'),
+      ('Tell me the sweetest compliment you’ve ever received.'),
+      ('What’s one thing you secretly find attractive?'),
+      ('Explain your biggest green flag in a relationship.'),
+      ('What’s your most embarrassing texting mistake?'),
+      ('Tell me about a moment that made your heart race.'),
+      ('What’s something romantic you’ve never tried but want to?'),
+      ('Describe your dream date from start to finish.'),
+      ('What’s one memory you wish you could relive?'),
+      ('What’s your biggest turn-on emotionally?'),
+      ('Tell me about your first heartbreak.'),
+      ('What’s the cutest thing someone has done for you?'),
+      ('What’s your guilty pleasure when nobody’s watching?'),
+      ('Describe your “perfect night together.”')
+      ON CONFLICT DO NOTHING;
+    `);
+
+    // Seed Dare Questions
+    await client.query(`
+      INSERT INTO dare_questions (content) VALUES 
+      ('Send a voice note saying your best pickup line.'),
+      ('Describe me in the flirtiest way possible.'),
+      ('Send a dramatic “I miss you” voice message.'),
+      ('Tell a cheesy joke and try not to laugh.'),
+      ('Say my name in the sweetest voice you can.'),
+      ('Pretend we’re on our first date and introduce yourself.'),
+      ('Record yourself singing one romantic line from any song.'),
+      ('Send a text confession like we’re in a movie scene.'),
+      ('Try to make me blush using only your voice.'),
+      ('Send your most-used emoji and explain why.'),
+      ('Tell me a fake love story about us in 30 seconds.'),
+      ('Describe your perfect cuddle session.'),
+      ('Give me a nickname and explain it dramatically.'),
+      ('Pretend you’re jealous and send a playful voice note.'),
+      ('Roast yourself in the funniest way possible.'),
+      ('Send a voice note with your “radio host” flirting voice.'),
+      ('Tell me your best “good morning” message.'),
+      ('Describe your current mood like a romance narrator.'),
+      ('Send a fake proposal speech.'),
+      ('Explain why you’d survive in a dating reality show.')
+      ON CONFLICT DO NOTHING;
+    `);
 
     // Streaks table
     await client.query(`
@@ -230,7 +311,45 @@ async function initDb() {
       );
     `);
     console.log('  ✓ game_sessions');
-    
+
+    // Migration: ensure state column exists in game_sessions
+    try {
+      await client.query(`
+        ALTER TABLE game_sessions ADD COLUMN IF NOT EXISTS state JSONB DEFAULT '{}'::jsonb;
+        ALTER TABLE game_sessions ADD COLUMN IF NOT EXISTS duration INTEGER DEFAULT 0;
+        ALTER TABLE game_sessions ADD COLUMN IF NOT EXISTS game_name VARCHAR(100);
+      `);
+    } catch (e) {
+      console.log('  Note: game_sessions migration partially applied or skipped.');
+    }
+
+    // Game Messages table (separate from chat messages)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS game_messages (
+        id SERIAL PRIMARY KEY,
+        session_id UUID NOT NULL REFERENCES game_sessions(id) ON DELETE CASCADE,
+        sender_id UUID REFERENCES users(id) ON DELETE SET NULL,
+        content TEXT NOT NULL,
+        message_type VARCHAR(30) DEFAULT 'text',
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_game_messages_session ON game_messages(session_id);`);
+    console.log('  ✓ game_messages');
+
+    // Game Plays table — tracks daily free play usage per user per game
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS game_plays (
+        id SERIAL PRIMARY KEY,
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        game_id VARCHAR(50) NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+        channel_id INTEGER REFERENCES channels(id) ON DELETE SET NULL,
+        played_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_game_plays_user_game ON game_plays(user_id, game_id);`);
+    console.log('  ✓ game_plays');
+
     // Subscription Plans table
     await client.query(`
       CREATE TABLE IF NOT EXISTS subscription_plans (
@@ -275,56 +394,71 @@ async function initDb() {
       ON CONFLICT (id) DO NOTHING;
     `);
 
-    // Initial games data
+    // Initial games data — all fields updated on conflict so admin edits persist after restart
     await client.query(`
-      INSERT INTO games (id, name, icon, description, min_messages_required, daily_free_plays, unlimited_with_subscription, is_premium, phases)
+      INSERT INTO games (id, name, icon, image_url, description, category, min_messages_required, daily_free_plays, unlimited_with_subscription, is_premium, phases, active)
       VALUES 
       (
-        'truth_or_dare', 
-        'Truth or Dare', 
-        '🎲', 
-        'Spicy questions and dares for couples', 
-        200, 
-        3, 
-        TRUE, 
+        'truth_or_dare',
+        'Truth or Dare',
+        '🎲',
+        'assets/game_icons/t_or_d_logo.png',
+        'Spicy questions and dares for couples',
+        'fun',
+        20,
+        10,
+        TRUE,
         FALSE,
         '[
           {"type": "choose_category", "options": ["truth", "dare"]},
           {"type": "ask_question", "preStoredQuestions": ["What is your biggest secret?", "Have you ever cheated on a test?", "Dare: Send a voice note of you singing"]},
           {"type": "answer_question"}
-        ]'::jsonb
+        ]'::jsonb,
+        TRUE
       ),
       (
-        'would_you_rather', 
-        'Would You Rather', 
-        '🤔', 
-        'Classic dilemma game to know them better', 
-        500, 
-        5, 
-        TRUE, 
+        'would_you_rather',
+        'Would You Rather',
+        '🤔',
+        NULL,
+        'Classic dilemma game to know them better',
+        'fun',
+        100,
+        5,
+        TRUE,
         FALSE,
         '[
           {"type": "ask_question", "preStoredQuestions": ["Would you rather travel to the future or the past?", "Would you rather always be 10 minutes late or 20 minutes early?"]},
           {"type": "answer_question"}
-        ]'::jsonb
+        ]'::jsonb,
+        TRUE
       ),
       (
-        'rizz_master', 
-        'Rizz Master', 
-        '🔥', 
-        'Test your charm and see who has more rizz', 
-        1000, 
-        2, 
-        TRUE, 
+        'rizz_master',
+        'Rizz Master',
+        '🔥',
+        NULL,
+        'Test your charm and see who has more rizz',
+        'premium',
+        500,
+        2,
         TRUE,
-        '[]'::jsonb
+        TRUE,
+        '[]'::jsonb,
+        TRUE
       )
-      ON CONFLICT (id) DO UPDATE SET 
-        name = EXCLUDED.name,
-        icon = EXCLUDED.icon,
-        description = EXCLUDED.description,
-        min_messages_required = EXCLUDED.min_messages_required,
-        is_premium = EXCLUDED.is_premium;
+      ON CONFLICT (id) DO UPDATE SET
+        name                    = EXCLUDED.name,
+        icon                    = EXCLUDED.icon,
+        image_url               = EXCLUDED.image_url,
+        description             = EXCLUDED.description,
+        category                = EXCLUDED.category,
+        min_messages_required   = EXCLUDED.min_messages_required,
+        daily_free_plays        = EXCLUDED.daily_free_plays,
+        unlimited_with_subscription = EXCLUDED.unlimited_with_subscription,
+        is_premium              = EXCLUDED.is_premium,
+        phases                  = EXCLUDED.phases,
+        active                  = EXCLUDED.active;
     `);
 
     // Add boosting columns to profiles
@@ -334,7 +468,7 @@ async function initDb() {
         ALTER TABLE profiles ADD COLUMN IF NOT EXISTS popularity_score DOUBLE PRECISION DEFAULT 0;
       `);
       console.log('  ✓ added boosting columns to profiles');
-    } catch (e) {}
+    } catch (e) { }
 
     console.log('\nDatabase initialized successfully.');
   } catch (err) {

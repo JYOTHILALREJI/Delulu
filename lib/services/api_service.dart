@@ -348,6 +348,30 @@ class ApiService {
     return _client.get(Uri.parse('$baseUrl/games/status/$channelId'), headers: headers).timeout(_timeout);
   }
 
+  static Future<http.Response> getGameSession(String sessionId) async {
+    final headers = await authHeaders();
+    return _client.get(Uri.parse('$baseUrl/games/session/$sessionId'), headers: headers).timeout(_timeout);
+  }
+
+  static Future<http.Response> getGameMessages(String sessionId) async {
+    final headers = await authHeaders();
+    return _client.get(Uri.parse('$baseUrl/games/session/$sessionId/messages'), headers: headers).timeout(_timeout);
+  }
+
+  static Future<http.Response> getGamePlaysToday(String gameId) async {
+    final headers = await authHeaders();
+    return _client.get(Uri.parse('$baseUrl/games/plays/today/$gameId'), headers: headers).timeout(_timeout);
+  }
+
+  static Future<http.Response> recordGamePlay(String gameId, int channelId) async {
+    final headers = await authHeaders();
+    return _client.post(
+      Uri.parse('$baseUrl/games/plays/$gameId'),
+      headers: headers,
+      body: jsonEncode({'channelId': channelId}),
+    ).timeout(_timeout);
+  }
+
   // ── Leaderboard Endpoint ──
   static Future<http.Response> getLeaderboard() async {
     final headers = await authHeaders();

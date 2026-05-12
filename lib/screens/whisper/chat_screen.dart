@@ -21,27 +21,55 @@ import 'game_screen.dart';
 import '../../utils/encryption_helper.dart';
 
 Map<String, dynamic> _parseSingleMessage(Map<String, dynamic> msg) {
-  if (msg['created_at'] != null) {
-    try {
-      final dt = DateTime.parse(msg['created_at']).toLocal();
-      msg['_parsed_date'] = dt;
-      msg['_formatted_time'] = '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
-    } catch (_) {}
-  }
-  if (msg['message_type'] == 'game_status' && msg['content'] is String) {
-    try {
-      msg['_parsed_game_data'] = jsonDecode(msg['content']);
-    } catch (_) {}
-  }
+  // Use a copy to avoid mutating the original if it's reused
+  final Map<String, dynamic> parsed = Map<String, dynamic>.from(msg);
   
-  if (msg['content'] is String && msg['content'].toString().isNotEmpty) {
-    if (EncryptionHelper.isEncrypted(msg['content'].toString())) {
-      try {
-        msg['content'] = EncryptionHelper.decryptMessage(msg['content'].toString());
-      } catch (_) {}
+  Object? content = parsed['content'];
+  String contentStr = "";
+  
+  if (content is String) {
+    contentStr = content;
+    if (contentStr.isNotEmpty && !parsed.containsKey('pending')) {
+      if (EncryptionHelper.isEncrypted(contentStr)) {
+        try {
+          contentStr = EncryptionHelper.decryptMessage(contentStr);
+          parsed['content'] = contentStr;
+        } catch (_) {}
+      }
+    }
+  } else if (content is Map) {
+    // If it's already a map, we might need to stringify it for consistent internal storage
+    // but usually we can just use it.
+    contentStr = jsonEncode(content);
+  }
+
+  if (parsed['created_at'] != null) {
+    try {
+      final dt = DateTime.parse(parsed['created_at'].toString()).toLocal();
+      parsed['_parsed_date'] = dt;
+      parsed['_formatted_time'] = '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+    } catch (_) {}
+  }
+
+  if (parsed['message_type'] == 'game_status') {
+    try {
+      if (content is Map) {
+        parsed['_parsed_game_data'] = Map<String, dynamic>.from(content);
+      } else if (contentStr.isNotEmpty) {
+        final decoded = jsonDecode(contentStr);
+        if (decoded is Map) {
+          parsed['_parsed_game_data'] = Map<String, dynamic>.from(decoded);
+        } else {
+          parsed['_parsed_game_data'] = <String, dynamic>{};
+        }
+      }
+    } catch (e) {
+      print('[ChatScreen] Error parsing game data: $e');
+      parsed['_parsed_game_data'] = <String, dynamic>{};
     }
   }
-  return msg;
+  
+  return parsed;
 }
 
 Map<String, dynamic> _processMessagesResponse(String responseBody) {
@@ -114,17 +142,17 @@ class _ChatScreenState extends State<ChatScreen> {
     _isPeerOnline = widget.isOnline;
     _initPeerImageProvider();
     _audioRecorder = AudioRecorder();
-    
-    // Load cached user ID and messages immediately for instant render
+    // Mark this peer's chat as active so global banner is suppressed
+    SocketService().activeChatPeerId = widget.peerId;
+
     _loadCachedData().then((_) {
       _fetchCurrentUser().then((_) => _loadMessages());
     });
-    
+
     _fetchPeerProfile();
     _markRead();
     _initSocket();
-    
-    // Fix typing indicator: add listener
+
     _msgController.addListener(_onTypingChanged);
   }
 
@@ -278,9 +306,81 @@ class _ChatScreenState extends State<ChatScreen> {
       }
     });
 
-    // Listen for game invitations
+    // Listen for game invitations — show Accept/Reject sheet for User B
     SocketService().gameInviteStream.listen((data) {
-      // Global wrapper handles this now
+      if (!mounted) return;
+      // Only handle if the invite is from the current chat peer
+      final fromId = data['fromId']?.toString() ?? '';
+      if (fromId != widget.peerId) return;
+      final sessionId = data['sessionId']?.toString() ?? '';
+      final gameId   = data['gameId']?.toString()   ?? '';
+      final gameName = data['gameName']?.toString()  ?? 'Game';
+      final fromName = data['fromName']?.toString()  ?? widget.peerName;
+
+      showModalBottomSheet(
+        context: context,
+        backgroundColor: Colors.transparent,
+        isDismissible: false,
+        builder: (_) => Container(
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [Color(0xFF1A0033), Color(0xFF0D001A)],
+            ),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+            border: Border.all(color: Colors.white10),
+          ),
+          padding: const EdgeInsets.fromLTRB(24, 20, 24, 36),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(width: 36, height: 4,
+                decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2))),
+              const SizedBox(height: 20),
+              const Text('🎲', style: TextStyle(fontSize: 48)),
+              const SizedBox(height: 12),
+              Text('$fromName challenged you!',
+                style: GoogleFonts.outfit(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 6),
+              Text(gameName,
+                style: GoogleFonts.inter(color: AppColors.primary, fontSize: 14, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 24),
+              Row(children: [
+                Expanded(child: OutlinedButton(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    SocketService().emitGameInviteResponse(
+                      widget.channelId, widget.peerId, gameId, gameName, sessionId, false);
+                  },
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: Colors.white24),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  ),
+                  child: Text('DECLINE', style: GoogleFonts.outfit(color: Colors.white54, letterSpacing: 1)),
+                )),
+                const SizedBox(width: 12),
+                Expanded(child: ElevatedButton(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    SocketService().emitGameInviteResponse(
+                      widget.channelId, widget.peerId, gameId, gameName, sessionId, true);
+                    _navigateToGame(gameId, gameName, sessionId: sessionId, isInviter: false);
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  ),
+                  child: Text('ACCEPT 🎉', style: GoogleFonts.outfit(
+                    color: Colors.black, fontWeight: FontWeight.bold, letterSpacing: 1)),
+                )),
+              ]),
+            ],
+          ),
+        ),
+      );
     });
 
     // Listen for game invitation responses (already handled in GameDrawer, but good for global state if needed)
@@ -293,7 +393,7 @@ class _ChatScreenState extends State<ChatScreen> {
     });
   }
 
-  void _navigateToGame(String gameId, String gameName, {String? sessionId, bool viewOnly = false}) {
+  void _navigateToGame(String gameId, String gameName, {String? sessionId, bool viewOnly = false, bool isInviter = false}) {
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -302,7 +402,7 @@ class _ChatScreenState extends State<ChatScreen> {
           gameName: gameName,
           peerId: widget.peerId,
           peerName: widget.peerName,
-          isInviter: false,
+          isInviter: isInviter,
           channelId: widget.channelId,
           sessionId: sessionId,
           viewOnly: viewOnly,
@@ -322,6 +422,8 @@ class _ChatScreenState extends State<ChatScreen> {
         peerId: widget.peerId,
         peerName: widget.peerName,
         onReturnFromGame: _loadMessages,
+        initialMessageCount: _messages.length,
+        isPeerOnline: _isPeerOnline,
       ),
     );
   }
@@ -390,6 +492,10 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   void dispose() {
+    // Clear the active chat peer so global game invite banner resumes
+    if (SocketService().activeChatPeerId == widget.peerId) {
+      SocketService().activeChatPeerId = null;
+    }
     _msgController.removeListener(_onTypingChanged);
     _msgController.dispose();
     _scrollController.dispose();
@@ -1335,23 +1441,7 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  Map<String, dynamic> _parseSingleMessage(Map<String, dynamic> msg) {
-    String content = msg['content'] ?? '';
-    
-    if (content.isNotEmpty && !msg.containsKey('pending')) {
-       if (EncryptionHelper.isEncrypted(content)) {
-          try { content = EncryptionHelper.decryptMessage(content); } catch (_) {}
-       }
-    }
-    
-    return {
-      ...msg,
-      'content': content,
-      '_parsed_date': DateTime.tryParse(msg['created_at'] ?? ''),
-      '_formatted_time': _formatTime(msg['created_at']),
-      if (msg['message_type'] == 'game_status') '_parsed_game_data': jsonDecode(content),
-    };
-  }
+  // Consolidated with top-level version
 
   String _formatTime(String iso) {
     try {
@@ -1398,7 +1488,9 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Widget _buildGameStatusCard(Map<String, dynamic> msg) {
-    Map<String, dynamic> data = msg['_parsed_game_data'] ?? {};
+    final Map<String, dynamic> data = (msg['_parsed_game_data'] is Map) 
+        ? Map<String, dynamic>.from(msg['_parsed_game_data'] as Map) 
+        : {};
     final isMe = msg['sender_id'].toString() == _currentUserId.toString();
 
     final status = data['status'] ?? 'unknown';
@@ -1411,6 +1503,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
     switch (status) {
       case 'accepted':
+      case 'completed':
         statusColor = AppColors.primary;
         statusText = 'Game Accepted!';
         statusIcon = Icons.sports_esports;
@@ -1421,14 +1514,10 @@ class _ChatScreenState extends State<ChatScreen> {
         statusIcon = Icons.block;
         break;
       case 'cancelled':
+      case 'missed':
         statusColor = Colors.white54;
-        statusText = 'Invitation Cancelled';
+        statusText = 'Invitation Missed';
         statusIcon = Icons.cancel;
-        break;
-      case 'completed':
-        statusColor = AppColors.secondary;
-        statusText = 'Game Finished';
-        statusIcon = Icons.check_circle;
         break;
       default:
         statusColor = Colors.white38;

@@ -50,17 +50,8 @@ class _GameScreenState extends State<GameScreen> {
   int _gameDuration = 0;
   Timer? _durationTimer;
   
-  // Truth or Dare specific state
-  Map<String, dynamic> _gameState = {
-    'askerId': '', // who is answering the question
-    'phase': 'selecting_category', // selecting_category, selecting_question, answering
-    'category': '', // truth or dare
-    'question': '',
-    'myPoints': 0,
-    'peerPoints': 0,
-    'history': [], // [{senderName, text, type, messageType}]
-    'suggestedQuestions': [],
-  };
+  // Truth or Dare state — starts empty, populated from API after game starts
+  Map<String, dynamic> _gameState = {};
   
   int _responseTimerSeconds = 60;
   Timer? _responseTimer;
@@ -69,10 +60,12 @@ class _GameScreenState extends State<GameScreen> {
 
   // Messaging state
   final TextEditingController _msgController = TextEditingController();
+  final TextEditingController _customQuestionController = TextEditingController();
   final AudioRecorder _audioRecorder = AudioRecorder();
   final AudioPlayer _audioPlayer = AudioPlayer();
   bool _isRecording = false;
   String? _currentRecordingPath;
+  bool _isActionLoading = false;
 
   final List<String> _truthQuestions = [
     "Tell me about your most unforgettable crush.",
@@ -138,29 +131,86 @@ class _GameScreenState extends State<GameScreen> {
     super.initState();
     _currentSessionId = widget.sessionId;
     _fetchCurrentUser();
-    _loadMessages();
-    
+
+    // Initialize game listeners early to catch events
+    _initGameListeners();
+
     if (widget.viewOnly) {
+      // View-only: just load the history, no live socket listeners
       _isWaiting = false;
-      _initGameListeners();
+      _loadGameState();
+    } else if (widget.isInviter) {
+      _isWaiting = true;
+      _initInviteSentListener();
+      _initResponseListener();
+      // Recover sessionId in case game_invite_sent was missed
+      _fetchPendingSession();
     } else {
-      _isWaiting = widget.isInviter;
-      if (widget.isInviter) {
-        _initInviteSentListener();
-        _initResponseListener();
-        _checkInitialStatus();
-      } else {
-        _startGameDurationTimer();
-        _initGameListeners();
-      }
+      // Receiver: not waiting, load state immediately
+      _isWaiting = false;
+      _startGameDurationTimer();
+      _loadGameState();
+      // Also listen for game end by inviter
+      _endSub = SocketService().gameEndStream.listen((data) {
+        if (mounted) Navigator.pop(context);
+      });
     }
   }
 
-  Future<void> _loadMessages() async {
+  /// Recover the sessionId from the API for User A (inviter) in case
+  /// the game_invite_sent socket event was missed before GameScreen mounted.
+  Future<void> _fetchPendingSession() async {
+    if (_currentSessionId != null && _currentSessionId!.isNotEmpty) return;
     try {
-      final res = await ApiService.getMessages(widget.channelId);
+      final res = await ApiService.getGameStatus(widget.channelId);
       if (res.statusCode == 200) {
-        final List<dynamic> data = jsonDecode(res.body);
+        final body = jsonDecode(res.body);
+        final sid = body['sessionId']?.toString();
+        if (sid != null && sid.isNotEmpty && mounted) {
+          setState(() => _currentSessionId = sid);
+        }
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _loadGameState() async {
+    if (_currentSessionId == null) return;
+    print('[GameScreen] Loading game state for session: $_currentSessionId');
+    try {
+      final res = await ApiService.getGameSession(_currentSessionId!);
+      if (res.statusCode == 200) {
+        final body = jsonDecode(res.body) as Map<String, dynamic>;
+        final session = body['session'];
+        if (mounted && session != null) {
+          final newState = Map<String, dynamic>.from(session['state'] ?? {});
+          print('[GameScreen] Loaded state: $newState');
+          setState(() {
+            _gameState = newState;
+            if (_gameState['myPoints'] == null) _gameState['myPoints'] = 0;
+            if (_gameState['peerPoints'] == null) _gameState['peerPoints'] = 0;
+            
+            // If we have a phase, we are definitely not waiting
+            if (_gameState.containsKey('phase')) {
+              _isWaiting = false;
+            }
+          });
+        }
+      } else {
+        print('[GameScreen] Error response: ${res.statusCode} - ${res.body}');
+      }
+    } catch (e) {
+      print('[GameScreen] Error loading game state: $e');
+    }
+    await _loadMessages();
+  }
+
+  Future<void> _loadMessages() async {
+    if (_currentSessionId == null) return;
+    try {
+      final res = await ApiService.getGameMessages(_currentSessionId!);
+      if (res.statusCode == 200) {
+        final body = jsonDecode(res.body) as Map<String, dynamic>;
+        final List<dynamic> data = body['messages'] ?? [];
         if (mounted) {
           setState(() {
             _messages = data.map((m) => Map<String, dynamic>.from(m)).toList();
@@ -169,7 +219,7 @@ class _GameScreenState extends State<GameScreen> {
         }
       }
     } catch (e) {
-      print('Error loading messages: $e');
+      print('[GameScreen] Error loading messages: $e');
     }
   }
 
@@ -184,50 +234,98 @@ class _GameScreenState extends State<GameScreen> {
       }
     });
   }
-
   void _initGameListeners() {
     _stateSub = SocketService().gameStateStream.listen((data) {
-      if (mounted && data['sessionId'] == _currentSessionId) {
+      if (!mounted) return;
+      final sid = data['sessionId']?.toString();
+      final state = data['state'];
+      print('[GameScreen] Received gameState update for $sid: $state');
+      
+      if (sid == null) return;
+      
+      // Capture sessionId if we were waiting for it
+      if (_currentSessionId == null || _currentSessionId!.isEmpty) {
+        setState(() => _currentSessionId = sid);
+      } else if (sid != _currentSessionId) {
+        print('[GameScreen] SID mismatch: $sid != $_currentSessionId');
+        return; 
+      }
+
+      if (state != null) {
         setState(() {
-          _gameState = Map<String, dynamic>.from(data['state']);
+          try {
+            _gameState = Map<String, dynamic>.from(state as Map);
+            // If we got state with a phase, we are no longer waiting
+            if (_gameState.containsKey('phase')) {
+              _isWaiting = false;
+            }
+          } catch (e) {
+            print('[GameScreen] Error parsing state: $e');
+          }
         });
+        if (_gameState['phase'] == 'answering') _startTimerSync();
       }
     });
 
-    SocketService().newMessageStream.listen((msg) {
-      if (mounted && msg['channel_id'] == widget.channelId) {
-        setState(() {
-          _messages.add(msg);
-        });
+    SocketService().newGameMessageStream.listen((msg) {
+      if (!mounted) return;
+      final sid = msg['session_id']?.toString();
+      if (sid != null && sid == _currentSessionId) {
+        setState(() => _messages.add(Map<String, dynamic>.from(msg)));
         _scrollToBottom();
       }
     });
 
     _pointsSub = SocketService().gamePointsStream.listen((data) {
-      if (mounted && data['sessionId'] == _currentSessionId) {
+      if (!mounted) return;
+      final sid = data['sessionId']?.toString();
+      if (sid != null && sid == _currentSessionId) {
         setState(() {
-          if (data['userId'].toString() == _currentUserId.toString()) {
-            _gameState['myPoints'] = data['points'];
-          } else {
-            _gameState['peerPoints'] = data['points'];
-          }
+          _gameState['scores'] = data['scores'];
         });
+      }
+    });
+
+    _endSub = SocketService().gameEndStream.listen((data) {
+      if (!mounted) return;
+      final sid = data['sessionId']?.toString();
+      final endedBy = data['userName']?.toString() ?? 'Peer';
+      if (sid != null && sid == _currentSessionId) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('$endedBy ended the game session.', style: GoogleFonts.inter(color: Colors.white)),
+            backgroundColor: AppColors.primary,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+        Navigator.pop(context);
       }
     });
   }
 
   // --- Actions ---
   void _onCategorySelected(String choice) {
-    SocketService().emitSelectChoice(_currentSessionId!, choice, widget.peerId);
+    if (_currentSessionId == null || _isActionLoading) return;
+    setState(() => _isActionLoading = true);
+    SocketService().emitGameSelectChoice(_currentSessionId!, choice, widget.peerId);
+    // Auto-reset loading after 5s if no response
+    Future.delayed(const Duration(seconds: 5), () {
+       if (mounted) setState(() => _isActionLoading = false);
+    });
   }
 
   void _onQuestionSelected(String question) {
-    SocketService().emitSendQuestion(_currentSessionId!, question, widget.peerId);
+    if (_currentSessionId == null || _isActionLoading) return;
+    setState(() => _isActionLoading = true);
+    SocketService().emitGameSendQuestion(_currentSessionId!, question, widget.peerId);
+    Future.delayed(const Duration(seconds: 5), () {
+       if (mounted) setState(() => _isActionLoading = false);
+    });
   }
 
   Future<void> _sendTextAnswer() async {
     final text = _msgController.text.trim();
-    if (text.isEmpty) return;
+    if (text.isEmpty || _currentSessionId == null) return;
     
     _msgController.clear();
     SocketService().emitSubmitAnswer(_currentSessionId!, text, widget.peerId, 'text');
@@ -270,6 +368,7 @@ class _GameScreenState extends State<GameScreen> {
               _currentSessionId = body['sessionId'] ?? body['id']?.toString();
             });
             _startGameDurationTimer();
+            _loadGameState();
             _initGameListeners();
           }
         }
@@ -277,6 +376,27 @@ class _GameScreenState extends State<GameScreen> {
     } catch (e) {
       print('Error checking initial status: $e');
     }
+  }
+
+  void _startTimerSync() {
+    _responseTimer?.cancel();
+    _responseTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      final endsAt = _gameState['timerEndsAt'];
+      if (endsAt == null) {
+        _responseTimer?.cancel();
+        return;
+      }
+      try {
+        final endDateTime = DateTime.parse(endsAt.toString());
+        final remaining = endDateTime.difference(DateTime.now()).inSeconds;
+        setState(() => _responseTimerSeconds = remaining.clamp(0, 90));
+        if (remaining <= 0) _responseTimer?.cancel();
+      } catch (e) {
+        print('[GameScreen] Timer sync error: $e');
+        _responseTimer?.cancel();
+      }
+    });
   }
 
   void _initInviteSentListener() {
@@ -289,16 +409,38 @@ class _GameScreenState extends State<GameScreen> {
 
   void _initResponseListener() {
     _responseSub = SocketService().gameInviteResponseStream.listen((data) {
-      if (mounted && data['sessionId'] == _currentSessionId) {
-        if (data['accepted'] == true) {
-          setState(() => _isWaiting = false);
-          _startGameDurationTimer();
-          _initGameListeners();
-        } else {
-          Navigator.pop(context);
-        }
+      if (!mounted) return;
+      // Accept if sessionId matches, or as fallback if we haven't gotten sessionId yet
+      final sid = data['sessionId']?.toString();
+      final matchSid = _currentSessionId != null && sid == _currentSessionId;
+      final noSid = _currentSessionId == null || _currentSessionId!.isEmpty;
+      if (!matchSid && !noSid) return;
+
+      if (data['accepted'] == true) {
+        setState(() {
+          _isWaiting = false;
+          if (sid != null) _currentSessionId = sid;
+        });
+        _startGameDurationTimer();
+        _loadGameState();
+      } else {
+        // Invitation rejected
+        _showRejectionDialog();
       }
     });
+  }
+
+  void _showRejectionDialog() {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('${widget.peerName} is not available right now.', 
+          style: GoogleFonts.inter(color: Colors.white)),
+        backgroundColor: Colors.redAccent,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+    Navigator.pop(context);
   }
 
   void _startGameDurationTimer() {
@@ -328,6 +470,18 @@ class _GameScreenState extends State<GameScreen> {
             child: Text('CANCEL', style: GoogleFonts.inter(color: Colors.white)),
           ),
         ),
+        if (_currentSessionId != null) 
+          Padding(
+            padding: const EdgeInsets.only(bottom: 20),
+            child: TextButton.icon(
+              onPressed: () {
+                debugPrint('[GameScreen] Manual state reload triggered');
+                _loadGameState();
+              },
+              icon: const Icon(Icons.refresh, color: AppColors.primary),
+              label: Text('TAP IF STUCK', style: GoogleFonts.outfit(color: AppColors.primary)),
+            ),
+          ),
       ],
     );
   }
@@ -353,44 +507,104 @@ class _GameScreenState extends State<GameScreen> {
   }
 
   Widget _buildGameRoomUI() {
+    final bool stateLoaded = _gameState.containsKey('phase');
+    final bool isKeyboardUp = MediaQuery.of(context).viewInsets.bottom > 0;
+
     return Column(
       children: [
         _buildHeader(),
-        _buildScoreBoard(),
-        Expanded(
-          child: ListView.builder(
-            controller: _scrollController,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
-            itemCount: _messages.length,
-            itemBuilder: (context, index) => _buildChatMessage(_messages[index]),
+        // Hide scoreboard when keyboard is up to save space
+        if (!widget.viewOnly && !isKeyboardUp) _buildScoreBoard(),
+        
+        if (widget.viewOnly)
+          Container(
+            margin: const EdgeInsets.symmetric(horizontal: 24, vertical: 6),
+            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.04),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.white.withOpacity(0.07)),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.history, color: Colors.white38, size: 14),
+                const SizedBox(width: 6),
+                Text('Game history — view only',
+                    style: GoogleFonts.inter(color: Colors.white38, fontSize: 12)),
+              ],
+            ),
           ),
-        ),
-        _buildActionArea(),
+        if (!stateLoaded && !widget.viewOnly)
+          const Expanded(child: Center(child: CircularProgressIndicator(color: AppColors.primary)))
+        else
+          Expanded(
+            child: _messages.isEmpty
+                ? Center(
+                    child: Text('No messages in this session.',
+                        style: GoogleFonts.inter(color: Colors.white24, fontSize: 13)),
+                  )
+                : ListView.builder(
+                    controller: _scrollController,
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                    itemCount: _messages.length,
+                    itemBuilder: (context, index) => _buildChatMessage(_messages[index]),
+                  ),
+          ),
+        if (!widget.viewOnly && stateLoaded) 
+          Padding(
+            padding: EdgeInsets.only(
+              bottom: isKeyboardUp ? 10 : (MediaQuery.of(context).padding.bottom + 10),
+              left: 16,
+              right: 16,
+            ),
+            child: _buildActionArea(),
+          ),
       ],
     );
   }
 
   Widget _buildChatMessage(Map<String, dynamic> msg) {
-    final bool isMe = msg['sender_id'].toString() == _currentUserId;
-    final String type = msg['message_type'];
-    
-    if (type == 'game_status') {
-      try {
-        final content = jsonDecode(msg['content']);
-        if (content['text'] != null) {
-          return Center(
-            child: Container(
-              margin: const EdgeInsets.symmetric(vertical: 8),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-              decoration: BoxDecoration(color: Colors.white10, borderRadius: BorderRadius.circular(12)),
-              child: Text(content['text'], style: GoogleFonts.inter(color: Colors.white54, fontSize: 11)),
-            ),
-          );
-        }
-      } catch (_) {}
-      return const SizedBox.shrink();
+    final String type = (msg['message_type'] ?? 'text') as String;
+    final String content = (msg['content'] ?? '') as String;
+
+    // System messages — centered pill
+    if (type == 'system') {
+      return Center(
+        child: Container(
+          margin: const EdgeInsets.symmetric(vertical: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
+          decoration: BoxDecoration(
+            color: Colors.white10,
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Text(content, style: GoogleFonts.inter(color: Colors.white54, fontSize: 11)),
+        ),
+      );
     }
 
+    // Question bubble — full-width card
+    if (type == 'question') {
+      return Container(
+        margin: const EdgeInsets.symmetric(vertical: 8),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: AppColors.primary.withOpacity(0.08),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppColors.primary.withOpacity(0.25)),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.quiz_outlined, color: AppColors.primary, size: 18),
+            const SizedBox(width: 10),
+            Expanded(child: Text(content, style: GoogleFonts.inter(color: Colors.white, fontSize: 13, fontStyle: FontStyle.italic))),
+          ],
+        ),
+      );
+    }
+
+    // Text / Voice answer bubbles
+    final bool isMe = msg['sender_id']?.toString() == _currentUserId;
     return Align(
       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
@@ -401,9 +615,9 @@ class _GameScreenState extends State<GameScreen> {
           color: isMe ? AppColors.primary.withOpacity(0.2) : Colors.white10,
           borderRadius: BorderRadius.circular(16),
         ),
-        child: type == 'voice' 
-          ? _buildVoiceBubble(msg['content']) 
-          : Text(msg['content'], style: GoogleFonts.inter(color: Colors.white)),
+        child: type == 'voice'
+            ? _buildVoiceBubble(content)
+            : Text(content, style: GoogleFonts.inter(color: Colors.white)),
       ),
     );
   }
@@ -427,40 +641,72 @@ class _GameScreenState extends State<GameScreen> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          IconButton(icon: const Icon(Icons.close, color: Colors.white), onPressed: _confirmExit),
-          Text(widget.gameName.toUpperCase(), style: GoogleFonts.outfit(fontSize: 16, fontWeight: FontWeight.w900, letterSpacing: 3, color: AppColors.primary)),
-          _buildTimerIcon(),
+          IconButton(
+            icon: const Icon(Icons.close, color: Colors.white),
+            // viewOnly: close immediately — no confirmation needed
+            onPressed: widget.viewOnly ? () => Navigator.pop(context) : _confirmExit,
+          ),
+          Column(
+            children: [
+              Text(widget.gameName.toUpperCase(), style: GoogleFonts.outfit(fontSize: 16, fontWeight: FontWeight.w900, letterSpacing: 3, color: AppColors.primary)),
+              if (widget.viewOnly)
+                Text('HISTORY', style: GoogleFonts.inter(fontSize: 9, color: Colors.white38, letterSpacing: 2)),
+            ],
+          ),
+          widget.viewOnly ? const SizedBox(width: 48) : _buildTimerIcon(),
         ],
       ),
     );
   }
 
   Widget _buildTimerIcon() {
-    if (_gameState['phase'] != 'answering') return const SizedBox(width: 48);
+    final endsAt = _gameState['timerEndsAt'];
+    if (endsAt == null) return const SizedBox(width: 48);
+
+    int secs = 0;
+    try {
+      final endDateTime = DateTime.parse(endsAt.toString());
+      secs = endDateTime.difference(DateTime.now()).inSeconds.clamp(0, 120);
+    } catch (e) {
+      print('[GameScreen] Timer parse error: $e');
+      return const SizedBox(width: 48);
+    }
+
+    final color = secs < 10 ? Colors.redAccent : (secs < 30 ? Colors.orangeAccent : Colors.white70);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-      decoration: BoxDecoration(color: Colors.redAccent.withOpacity(0.1), borderRadius: BorderRadius.circular(20), border: Border.all(color: Colors.redAccent.withOpacity(0.3))),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withOpacity(0.3)),
+      ),
       child: Row(
         children: [
-          const Icon(Icons.timer_outlined, color: Colors.redAccent, size: 14),
+          Icon(Icons.timer_outlined, color: color, size: 14),
           const SizedBox(width: 4),
-          Text('$_responseTimerSeconds', style: GoogleFonts.jetBrainsMono(color: Colors.redAccent, fontSize: 12, fontWeight: FontWeight.bold)),
+          Text('$secs', style: GoogleFonts.jetBrainsMono(color: color, fontSize: 12, fontWeight: FontWeight.bold)),
         ],
       ),
     );
   }
 
   Widget _buildScoreBoard() {
+    final scores = (_gameState['scores'] as Map?);
+    final myScore  = (scores?[_currentUserId ?? ''] ?? 0) as num;
+    final peerScore = (scores?[widget.peerId] ?? 0) as num;
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 24),
       padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 20),
-      decoration: BoxDecoration(color: Colors.white.withOpacity(0.03), borderRadius: BorderRadius.circular(20), border: Border.all(color: Colors.white.withOpacity(0.05))),
+      decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.03),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: Colors.white.withOpacity(0.05))),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          _buildPlayerScore('YOU', _gameState['myPoints']),
+          _buildPlayerScore('YOU', myScore.toInt()),
           Container(height: 20, width: 1, color: Colors.white10),
-          _buildPlayerScore(widget.peerName, _gameState['peerPoints']),
+          _buildPlayerScore(widget.peerName, peerScore.toInt()),
         ],
       ),
     );
@@ -478,7 +724,7 @@ class _GameScreenState extends State<GameScreen> {
   Widget _buildActionArea() {
     final phase = _gameState['phase'] ?? 'selecting_category';
     final currentTurn = _gameState['currentTurn']?.toString();
-    final bool isMyTurn = currentTurn == _currentUserId;
+    final bool isMyTurn = currentTurn != null && currentTurn == _currentUserId;
 
     if (!isMyTurn) {
       return _buildWaitingForPeer();
@@ -499,13 +745,13 @@ class _GameScreenState extends State<GameScreen> {
   Widget _buildCategorySelection() {
     return Column(
       children: [
-        const SizedBox(height: 32),
-        Text("Your Turn to Choose!", style: GoogleFonts.outfit(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white)),
-        const SizedBox(height: 24),
+        const SizedBox(height: 16),
+        Text("Your Turn to Choose!", style: GoogleFonts.outfit(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
+        const SizedBox(height: 20),
         Row(
           children: [
             Expanded(child: _buildCategoryButton('TRUTH', Icons.help_outline, const Color(0xFF4CAF50), () => _onCategorySelected('truth'))),
-            const SizedBox(width: 16),
+            const SizedBox(width: 12),
             Expanded(child: _buildCategoryButton('DARE', Icons.flash_on, const Color(0xFFFF9800), () => _onCategorySelected('dare'))),
           ],
         ),
@@ -514,17 +760,26 @@ class _GameScreenState extends State<GameScreen> {
   }
 
   Widget _buildCategoryButton(String label, IconData icon, Color color, VoidCallback onTap) {
-    return GestureDetector(
-      onTap: onTap,
+    return InkWell(
+      onTap: _isActionLoading ? null : onTap,
+      borderRadius: BorderRadius.circular(20),
       child: Container(
-        height: 110,
-        decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(24), border: Border.all(color: color.withOpacity(0.3), width: 1.5)),
+        height: 85, // Reduced from 110
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.08), 
+          borderRadius: BorderRadius.circular(20), 
+          border: Border.all(color: color.withOpacity(0.2), width: 1.2)
+        ),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, color: color, size: 30),
-            const SizedBox(height: 8),
-            Text(label, style: GoogleFonts.outfit(fontSize: 16, fontWeight: FontWeight.w900, color: color, letterSpacing: 1.5)),
+            if (_isActionLoading)
+              const CircularProgressIndicator(strokeWidth: 2, color: Colors.white)
+            else ...[
+              Icon(icon, color: color, size: 24), // Reduced from 30
+              const SizedBox(height: 6),
+              Text(label, style: GoogleFonts.outfit(fontSize: 14, fontWeight: FontWeight.w900, color: color, letterSpacing: 1.2)),
+            ],
           ],
         ),
       ),
@@ -532,46 +787,79 @@ class _GameScreenState extends State<GameScreen> {
   }
 
   Widget _buildQuestionPicker() {
-    final List suggested = _gameState['suggestedQuestions'] ?? [];
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const SizedBox(height: 32),
-        Text("Pick a Question for ${widget.peerName}", style: GoogleFonts.outfit(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
-        const SizedBox(height: 16),
-        ...suggested.map((q) => GestureDetector(
-          onTap: () => _onQuestionSelected(q),
-          child: Container(
-            width: double.infinity,
-            margin: const EdgeInsets.only(bottom: 12),
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(color: Colors.white.withOpacity(0.04), borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.white.withOpacity(0.08))),
-            child: Text(q, style: GoogleFonts.inter(color: Colors.white, fontSize: 14)),
+    final List suggested = (_gameState['suggestedQuestions'] as List?) ?? [];
+    final category = (_gameState['category'] ?? 'truth') as String;
+    final local = category == 'dare' ? _dareQuestions : _truthQuestions;
+    final display = suggested.isNotEmpty ? suggested : local.take(5).toList();
+    return Padding(
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const SizedBox(height: 8),
+          Text("Pick a Question for ${widget.peerName}",
+              style: GoogleFonts.outfit(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
+          const SizedBox(height: 10),
+          // Constrain the suggested questions list height
+          ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.25),
+            child: SingleChildScrollView(
+              child: Column(
+                children: display.map((q) => GestureDetector(
+                  onTap: () => _onQuestionSelected(q.toString()),
+                  child: Container(
+                    width: double.infinity,
+                    margin: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.04),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.white.withOpacity(0.06))),
+                    child: Text(q.toString(), style: GoogleFonts.inter(color: Colors.white, fontSize: 12)),
+                  ),
+                )).toList(),
+              ),
+            ),
           ),
-        )),
-        const SizedBox(height: 12),
-        _buildCustomQuestionInput(),
-      ],
+          const SizedBox(height: 8),
+          _buildCustomQuestionInput(),
+        ],
+      ),
     );
   }
 
   Widget _buildCustomQuestionInput() {
-    final controller = TextEditingController();
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      decoration: BoxDecoration(color: Colors.white.withOpacity(0.04), borderRadius: BorderRadius.circular(16), border: Border.all(color: AppColors.primary.withOpacity(0.2))),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.08), // Brighter background
+        borderRadius: BorderRadius.circular(16), 
+        border: Border.all(color: AppColors.primary.withOpacity(0.4), width: 1.2) // Brighter border
+      ),
       child: Row(
         children: [
           Expanded(
             child: TextField(
-              controller: controller,
+              controller: _customQuestionController,
               style: const TextStyle(color: Colors.white, fontSize: 14),
-              decoration: const InputDecoration(hintText: "Or type your own question...", hintStyle: TextStyle(color: Colors.white24), border: InputBorder.none),
+              decoration: const InputDecoration(
+                hintText: "Or type your own question...", 
+                hintStyle: TextStyle(color: Colors.white38), // Brighter hint
+                border: InputBorder.none
+              ),
             ),
           ),
-          IconButton(icon: const Icon(Icons.send_rounded, color: AppColors.primary, size: 20), onPressed: () {
-            if (controller.text.trim().isNotEmpty) _onQuestionSelected(controller.text.trim());
-          }),
+          IconButton(
+            icon: const Icon(Icons.send_rounded, color: AppColors.primary, size: 22), 
+            onPressed: () {
+              final text = _customQuestionController.text.trim();
+              if (text.isNotEmpty) {
+                _onQuestionSelected(text);
+                _customQuestionController.clear();
+              }
+            }
+          ),
         ],
       ),
     );
@@ -580,14 +868,20 @@ class _GameScreenState extends State<GameScreen> {
   Widget _buildChatInput() {
     return Column(
       children: [
-        const SizedBox(height: 32),
+        const SizedBox(height: 16),
         Container(
-          padding: const EdgeInsets.all(20),
+          padding: const EdgeInsets.all(16),
           width: double.infinity,
-          decoration: BoxDecoration(color: AppColors.primary.withOpacity(0.1), borderRadius: BorderRadius.circular(24), border: Border.all(color: AppColors.primary.withOpacity(0.2))),
-          child: Text(_gameState['question'] ?? "Answer the question!", style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white), textAlign: TextAlign.center),
+          decoration: BoxDecoration(
+            color: AppColors.primary.withOpacity(0.08), 
+            borderRadius: BorderRadius.circular(20), 
+            border: Border.all(color: AppColors.primary.withOpacity(0.15))
+          ),
+          child: Text(_gameState['question'] ?? "Answer the question!", 
+            style: GoogleFonts.outfit(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white), 
+            textAlign: TextAlign.center),
         ),
-        const SizedBox(height: 24),
+        const SizedBox(height: 16),
         Row(
           children: [
             Expanded(
@@ -628,7 +922,7 @@ class _GameScreenState extends State<GameScreen> {
         _isRecording = true;
         _currentRecordingPath = path;
       });
-      if (await Vibration.hasVibrator() ?? false) Vibration.vibrate(duration: 50);
+      if ((await Vibration.hasVibrator()) == true) Vibration.vibrate(duration: 50);
     }
   }
 
@@ -687,6 +981,8 @@ class _GameScreenState extends State<GameScreen> {
 
   @override
   void dispose() {
+    _msgController.dispose();
+    _customQuestionController.dispose();
     _responseSub?.cancel();
     _inviteSentSub?.cancel();
     _stateSub?.cancel();

@@ -27,9 +27,14 @@ class SocketService {
   final _messageUpdateController = StreamController<Map<String, dynamic>>.broadcast();
   final _gameMissedController = StreamController<Map<String, dynamic>>.broadcast();
   final _errorController = StreamController<Map<String, dynamic>>.broadcast();
+  final _gameMessageController = StreamController<Map<String, dynamic>>.broadcast();
 
   Map<String, dynamic>? _lastInviteSent;
   Map<String, dynamic>? get lastInviteSent => _lastInviteSent;
+
+  /// Set to the peerId of the currently open ChatScreen.
+  /// GlobalWrapper uses this to decide whether to show the top banner.
+  String? activeChatPeerId;
 
   Stream<Map<String, dynamic>> get messageStream => _messageController.stream;
   Stream<Map<String, dynamic>> get unreadStream => _unreadController.stream;
@@ -47,6 +52,7 @@ class SocketService {
   Stream<Map<String, dynamic>> get messageUpdateStream => _messageUpdateController.stream;
   Stream<Map<String, dynamic>> get gameMissedStream => _gameMissedController.stream;
   Stream<Map<String, dynamic>> get errorStream => _errorController.stream;
+  Stream<Map<String, dynamic>> get newGameMessageStream => _gameMessageController.stream;
 
   bool get connected => _socket?.connected ?? false;
 
@@ -118,28 +124,31 @@ class SocketService {
 
   Stream<Map<String, dynamic>> get newMessageStream => _messageController.stream;
 
-  void emitSelectChoice(String sessionId, String choice, String peerId) {
-    _socket?.emit('select_choice', {
+  void emitGameSelectChoice(String sessionId, String choice, String peerId) {
+    print('[SocketService] Emitting game_select_choice: $choice for session $sessionId');
+    _socket?.emit('game_select_choice', {
       'sessionId': sessionId,
       'choice': choice,
       'peerId': peerId,
     });
   }
 
-  void emitSendQuestion(String sessionId, String question, String peerId) {
-    _socket?.emit('send_question', {
+  void emitGameSendQuestion(String sessionId, String question, String peerId) {
+    print('[SocketService] Emitting game_send_question: $question');
+    _socket?.emit('game_send_question', {
       'sessionId': sessionId,
       'question': question,
       'peerId': peerId,
     });
   }
 
-  void emitSubmitAnswer(String sessionId, String answer, String peerId, String messageType, {int duration = 0}) {
-    _socket?.emit('submit_answer', {
+  void emitSubmitAnswer(String sessionId, String answer, String peerId, String type, {int duration = 0}) {
+    print('[SocketService] Emitting game_submit_answer: $type');
+    _socket?.emit('game_submit_answer', {
       'sessionId': sessionId,
       'answer': answer,
       'peerId': peerId,
-      'messageType': messageType,
+      'type': type,
       'duration': duration,
     });
   }
@@ -241,6 +250,14 @@ class SocketService {
       _errorController.add(data);
     });
 
+    _socket!.on('new_game_message', (data) {
+      try {
+        _gameMessageController.add(Map<String, dynamic>.from(data as Map));
+      } catch (e) {
+        print('[SocketService] Error mapping new_game_message: $e');
+      }
+    });
+
     _socket!.onConnectError((err) => print('Socket Connect Error: $err'));
     _socket!.onError((err) => print('Socket Error: $err'));
   }
@@ -265,7 +282,9 @@ class SocketService {
     _gamePointsController.close();
     _gameEndController.close();
     _messageUpdateController.close();
+    _gameMissedController.close();
     _errorController.close();
+    _gameMessageController.close();
     disconnect();
   }
 }

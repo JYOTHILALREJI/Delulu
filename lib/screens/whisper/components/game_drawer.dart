@@ -13,13 +13,18 @@ class GameDrawer extends StatefulWidget {
   final String peerId;
   final String peerName;
   final VoidCallback? onReturnFromGame;
-  
+  final int initialMessageCount;
+  /// Whether the peer is currently online. If false, invites are blocked.
+  final bool isPeerOnline;
+
   const GameDrawer({
-    super.key, 
+    super.key,
     required this.channelId,
     required this.peerId,
     required this.peerName,
     this.onReturnFromGame,
+    this.initialMessageCount = 0,
+    this.isPeerOnline = false,
   });
 
   @override
@@ -29,14 +34,19 @@ class GameDrawer extends StatefulWidget {
 class _GameDrawerState extends State<GameDrawer> {
   List<dynamic> _games = [];
   int _messageCount = 0;
-  bool _isLoading = true;
+  bool _isLoading = false;
   bool _isPremium = false;
   bool _isInviting = false;
+  // Tracks how many times user played each game today: { gameId: count }
+  Map<String, int> _todayPlays = {};
   StreamSubscription? _inviteResponseSub;
 
   @override
   void initState() {
     super.initState();
+    _messageCount = widget.initialMessageCount;
+    _games = [_truthOrDareFallback()];
+    _isLoading = false;
     _fetchData();
   }
 
@@ -82,32 +92,91 @@ class _GameDrawerState extends State<GameDrawer> {
 
   Future<void> _fetchData() async {
     try {
-      final gamesRes = await ApiService.getGames();
-      final statusRes = await ApiService.getGameStatus(widget.channelId);
-      final meRes = await ApiService.getMe();
+      final results = await Future.wait([
+        ApiService.getGames(),
+        ApiService.getGameStatus(widget.channelId),
+        ApiService.getMe(),
+      ]);
 
-      if (gamesRes.statusCode == 200 && statusRes.statusCode == 200) {
-        final gamesData = jsonDecode(gamesRes.body);
-        final statusData = jsonDecode(statusRes.body);
-        
-        bool isPremium = false;
-        if (meRes.statusCode == 200) {
-          isPremium = jsonDecode(meRes.body)['user']['is_premium'] ?? false;
-        }
+      final gamesRes = results[0];
+      final statusRes = results[1];
+      final meRes = results[2];
 
-        if (mounted) {
-          setState(() {
-            _games = gamesData['games'] ?? [];
-            _messageCount = statusData['messageCount'] ?? 0;
-            _isPremium = isPremium;
-            _isLoading = false;
-          });
-        }
+      List<dynamic> fetchedGames = [];
+      int messageCount = _messageCount;
+      bool isPremium = false;
+
+      if (gamesRes.statusCode == 200) {
+        fetchedGames = (jsonDecode(gamesRes.body)['games'] as List<dynamic>?) ?? [];
+      }
+
+      if (statusRes.statusCode == 200) {
+        final data = jsonDecode(statusRes.body);
+        final raw = data['messageCount'];
+        messageCount = raw is int ? raw : (int.tryParse(raw?.toString() ?? '0') ?? 0);
+      }
+
+      if (meRes.statusCode == 200) {
+        final data = jsonDecode(meRes.body);
+        isPremium = data['user']?['is_premium'] == true;
+      }
+
+      // Show ALL active games from the API
+      List<dynamic> filteredGames = List<dynamic>.from(fetchedGames);
+
+      // Always ensure Truth or Dare is present (prepend if missing)
+      if (filteredGames.every((g) => g['id']?.toString().toLowerCase() != 'truth_or_dare')) {
+        filteredGames.insert(0, _truthOrDareFallback());
+      }
+
+      // Fetch today play counts for all games in parallel
+      final Map<String, int> todayPlays = {};
+      await Future.wait(filteredGames.map((g) async {
+        final gameId = g['id']?.toString() ?? '';
+        if (gameId.isEmpty) return;
+        try {
+          final res = await ApiService.getGamePlaysToday(gameId);
+          if (res.statusCode == 200) {
+            final data = jsonDecode(res.body);
+            todayPlays[gameId] = data['count'] as int? ?? 0;
+          }
+        } catch (_) {}
+      }));
+
+      if (mounted) {
+        setState(() {
+          _games = filteredGames;
+          _messageCount = messageCount;
+          _isPremium = isPremium;
+          _todayPlays = todayPlays;
+          _isLoading = false;
+        });
       }
     } catch (e) {
-      if (mounted) setState(() => _isLoading = false);
+      debugPrint('[GameDrawer] _fetchData error: $e');
+      if (mounted) {
+        setState(() {
+          if (_games.isEmpty) _games = [_truthOrDareFallback()];
+          _isLoading = false;
+        });
+      }
     }
   }
+
+  Map<String, dynamic> _truthOrDareFallback() => {
+    'id': 'truth_or_dare',
+    'name': 'Truth or Dare',
+    'icon': '🎲',
+    'image_url': 'assets/game_icons/t_or_d_logo.png',
+    'description': 'Spicy questions and dares for couples',
+    'category': 'fun',
+    'min_messages_required': 20,
+    'daily_free_plays': 3,
+    'unlimited_with_subscription': true,
+    'is_premium': false,
+    'active': true,
+  };
+
 
   @override
   Widget build(BuildContext context) {
@@ -263,12 +332,28 @@ class _GameDrawerState extends State<GameDrawer> {
   }
 
   Widget _buildGameCard(Map<String, dynamic> game) {
-    final int required = game['min_messages_required'] ?? 200;
-    final double progress = (_messageCount / required).clamp(0.0, 1.0);
+    final String gameId = game['id']?.toString() ?? '';
+    final int required = (game['min_messages_required'] is int)
+        ? game['min_messages_required'] as int
+        : (int.tryParse(game['min_messages_required']?.toString() ?? '') ?? 20);
+    final int dailyFree = (game['daily_free_plays'] is int)
+        ? game['daily_free_plays'] as int
+        : (int.tryParse(game['daily_free_plays']?.toString() ?? '') ?? 3);
+    final bool unlimitedWithSub = game['unlimited_with_subscription'] == true;
+    final int playsToday = _todayPlays[gameId] ?? 0;
+    final double progress = required > 0 ? (_messageCount / required).clamp(0.0, 1.0) : 1.0;
     final bool isUnlockedByMessages = _messageCount >= required;
     final bool isPremiumGame = game['is_premium'] == true;
     final bool isPremiumLocked = isPremiumGame && !_isPremium;
-    final bool isPlayable = isUnlockedByMessages && !isPremiumLocked;
+    // Non-premium can play free games up to their daily limit
+    final bool hasFreePlaysLeft = !isPremiumGame && playsToday < dailyFree;
+    // Premium users get unlimited plays (if unlimited_with_subscription)
+    final bool hasPremiumPlays = _isPremium && unlimitedWithSub;
+    final bool canPlay = isUnlockedByMessages && !isPremiumLocked && (hasFreePlaysLeft || hasPremiumPlays) && widget.isPeerOnline;
+    final bool dailyLimitReached = isUnlockedByMessages && !isPremiumGame && !hasFreePlaysLeft && !hasPremiumPlays;
+    // Image URL from DB — asset path or network
+    final String? imageUrl = game['image_url']?.toString();
+    final bool isAssetImage = imageUrl != null && imageUrl.startsWith('assets/');
 
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
@@ -288,20 +373,34 @@ class _GameDrawerState extends State<GameDrawer> {
                   alignment: Alignment.topRight,
                   children: [
                     Container(
-                      padding: const EdgeInsets.all(12),
+                      width: 68,
+                      height: 68,
                       decoration: BoxDecoration(
-                        color: isPremiumGame 
+                        color: isPremiumGame
                             ? const Color(0xFF8B5CF6).withOpacity(0.15)
-                            : AppColors.primary.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(16),
-                        border: isPremiumGame 
+                            : AppColors.primary.withOpacity(0.08),
+                        borderRadius: BorderRadius.circular(20),
+                        border: isPremiumGame
                             ? Border.all(color: const Color(0xFF8B5CF6).withOpacity(0.3))
-                            : null,
+                            : Border.all(color: Colors.white.withOpacity(0.08)),
                       ),
-                      child: Text(
-                        game['icon'] ?? '🎲',
-                        style: const TextStyle(fontSize: 28),
-                      ),
+                      child: imageUrl != null
+                          ? ClipRRect(
+                              borderRadius: BorderRadius.circular(18),
+                              child: isAssetImage
+                                  ? Image.asset(imageUrl, fit: BoxFit.cover)
+                                  : Image.network(imageUrl, fit: BoxFit.cover,
+                                      errorBuilder: (_, __, ___) => Center(
+                                        child: Text(game['icon'] ?? '🎲',
+                                            style: const TextStyle(fontSize: 32)),
+                                      )),
+                            )
+                          : Center(
+                              child: Text(
+                                game['icon'] ?? '🎲',
+                                style: const TextStyle(fontSize: 32),
+                              ),
+                            ),
                     ),
                     if (isPremiumGame)
                       Positioned(
@@ -390,22 +489,42 @@ class _GameDrawerState extends State<GameDrawer> {
             const SizedBox(height: 20),
           ],
           Padding(
-            padding: const EdgeInsets.all(16.0),
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
             child: InkWell(
-              onTap: () {
+              onTap: () async {
                 if (isPremiumLocked) {
-                  Navigator.push(
+                  // Premium-only game — go to subscription
+                  Navigator.pop(context);
+                  Future.microtask(() => Navigator.push(
                     context,
                     MaterialPageRoute(builder: (_) => const SubscriptionScreen()),
-                  ).then((_) => _fetchData());
-                } else if (isPlayable && !_isInviting) {
+                  ));
+                } else if (!isUnlockedByMessages) {
+                  // Not enough messages— progress bar is shown, do nothing
+                  return;
+                } else if (!widget.isPeerOnline) {
+                  // Peer offline
+                  return;
+                } else if (dailyLimitReached) {
+                  // Daily free limit hit — offer subscription
+                  Navigator.pop(context);
+                  Future.microtask(() => Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const SubscriptionScreen()),
+                  ));
+                } else if (canPlay && !_isInviting) {
+                  // Record the play then send invite
+                  ApiService.recordGamePlay(gameId, widget.channelId);
+                  setState(() {
+                    _todayPlays[gameId] = (_todayPlays[gameId] ?? 0) + 1;
+                  });
                   SocketService().emitGameInvite(
                     widget.channelId,
                     widget.peerId,
-                    game['id'],
+                    gameId,
                     game['name'] ?? 'Game',
                   );
-                  _navigateToGame(game['id'], game['name'] ?? 'Game', ''); // Empty string for now
+                  _navigateToGame(gameId, game['name'] ?? 'Game', '');
                 }
               },
               borderRadius: BorderRadius.circular(16),
@@ -413,16 +532,18 @@ class _GameDrawerState extends State<GameDrawer> {
                 width: double.infinity,
                 padding: const EdgeInsets.symmetric(vertical: 14),
                 decoration: BoxDecoration(
-                  gradient: isPremiumLocked
+                  gradient: isPremiumLocked || dailyLimitReached
                       ? const LinearGradient(
-                          colors: [Color(0xFF8B5CF6), Color(0xFF6366F1)],
-                        )
-                      : (isPlayable
-                          ? const LinearGradient(colors: [AppColors.primary, AppColors.primaryContainer])
-                          : null),
-                  color: (isPlayable || isPremiumLocked) ? null : Colors.white.withOpacity(0.05),
+                          colors: [Color(0xFF8B5CF6), Color(0xFF6366F1)])
+                      : canPlay
+                          ? const LinearGradient(
+                              colors: [AppColors.primary, AppColors.primaryContainer])
+                          : null,
+                  color: (!canPlay && !isPremiumLocked && !dailyLimitReached)
+                      ? Colors.white.withOpacity(0.05)
+                      : null,
                   borderRadius: BorderRadius.circular(16),
-                  boxShadow: isPremiumLocked
+                  boxShadow: (isPremiumLocked || dailyLimitReached)
                       ? [
                           BoxShadow(
                             color: const Color(0xFF8B5CF6).withOpacity(0.3),
@@ -430,30 +551,82 @@ class _GameDrawerState extends State<GameDrawer> {
                             offset: const Offset(0, 4),
                           ),
                         ]
-                      : null,
+                      : canPlay
+                          ? [
+                              BoxShadow(
+                                color: AppColors.primary.withOpacity(0.3),
+                                blurRadius: 10,
+                                offset: const Offset(0, 4),
+                              ),
+                            ]
+                          : null,
                 ),
                 child: Center(
-                  child: Text(
-                    isPremiumLocked 
-                        ? 'GET RIZZ+' 
-                        : (_isInviting ? 'WAITING...' : (isPlayable ? 'PLAY NOW' : 'LOCKED')),
-                    style: GoogleFonts.outfit(
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 1.2,
-                      color: (isPlayable || isPremiumLocked) && !_isInviting ? Colors.white : Colors.white24,
-                    ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      if (isPremiumLocked || dailyLimitReached)
+                        const Padding(
+                          padding: EdgeInsets.only(right: 8),
+                          child: Icon(Icons.star, color: Colors.white, size: 16),
+                        ),
+                      if (_isInviting)
+                        const Padding(
+                          padding: EdgeInsets.only(right: 8),
+                          child: SizedBox(
+                            width: 14, height: 14,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2, color: Colors.white),
+                          ),
+                        ),
+                      Text(
+                        isPremiumLocked
+                            ? 'GET RIZZ+'
+                            : _isInviting
+                                ? 'SENDING...'
+                                : dailyLimitReached
+                                    ? 'GET RIZZ+ FOR UNLIMITED'
+                                    : !widget.isPeerOnline
+                                        ? 'OFFLINE — CAN\'T PLAY NOW'
+                                        : canPlay
+                                            ? 'SEND INVITE  •  ${dailyFree - playsToday}/${dailyFree} left'
+                                            : !isUnlockedByMessages
+                                                ? 'LOCKED'
+                                                : 'LOCKED',
+                        style: GoogleFonts.outfit(
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 1.0,
+                          fontSize: 13,
+                          color: (canPlay || isPremiumLocked || dailyLimitReached) && !_isInviting
+                              ? Colors.white
+                              : Colors.white24,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),
             ),
           ),
-          if (isPlayable)
+          if (isUnlockedByMessages && !dailyLimitReached && !isPremiumLocked)
             Padding(
-              padding: const EdgeInsets.only(bottom: 16, left: 16, right: 16),
+              padding: const EdgeInsets.only(bottom: 14, left: 16, right: 16),
               child: Center(
                 child: Text(
-                  'Daily plays: ${game['daily_free_plays']} free left',
-                  style: GoogleFonts.inter(fontSize: 11, color: Colors.white24),
+                  _isPremium
+                      ? 'Unlimited plays with RIZZ+ ★'
+                      : '$playsToday of $dailyFree free plays used today',
+                  style: GoogleFonts.inter(fontSize: 11, color: Colors.white38),
+                ),
+              ),
+            ),
+          if (dailyLimitReached)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 14, left: 16, right: 16),
+              child: Center(
+                child: Text(
+                  'Daily limit reached — get RIZZ+ for unlimited',
+                  style: GoogleFonts.inter(fontSize: 11, color: const Color(0xFF8B5CF6).withOpacity(0.8)),
                 ),
               ),
             ),
