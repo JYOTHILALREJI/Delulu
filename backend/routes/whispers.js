@@ -57,8 +57,12 @@ router.get('/connections', authMiddleware, async (req, res) => {
             };
 
             const peerId = row.peer_id;
-            const isOnline = onlineTracker.isOnline(peerId) && (row.online_status_enabled !== false);
+            // Privacy-aware online status
+            const isOnline = onlineTracker.canSeeOnlineStatus(peerId, userId);
             const lastSeen = (row.last_seen_enabled !== false) ? row.last_seen_at : null;
+            
+            // Check if typing TO ME
+            const isTyping = onlineTracker.isTypingTo(peerId, userId);
 
             return {
                 channel_id: row.channel_id,
@@ -69,7 +73,8 @@ router.get('/connections', authMiddleware, async (req, res) => {
                     photos: parseJson(row.photos),
                     is_online: isOnline,
                     last_seen: lastSeen,
-                    is_premium_user: row.is_premium_user
+                    is_premium_user: row.is_premium_user,
+                    is_typing: isTyping
                 },
                 last_message: row.last_message_type === 'voice' 
                     ? 'Voice Message 🎤' 
@@ -132,7 +137,11 @@ router.post('/mark-read/:channelId', authMiddleware, async (req, res) => {
             const readerRes = await db.query('SELECT read_receipt_enabled FROM profiles WHERE user_id = $1', [userId]);
             if (readerRes.rows.length > 0 && readerRes.rows[0].read_receipt_enabled !== false) {
                 // Notify the sender (peer) that their message was read
-                io.to(peerId).emit('message_read', { channelId, readerId: userId });
+                io.to(peerId).emit('message_read', { 
+                    channelId, 
+                    readerId: userId,
+                    readAt: new Date().toISOString()
+                });
             }
         }
 
@@ -166,21 +175,25 @@ router.get('/messages/:channelId', authMiddleware, async (req, res) => {
                     rm.content as reply_to_content,
                     rm.sender_id as reply_to_sender_id,
                     rm.message_type as reply_to_message_type,
-                    p_peer.read_receipt_enabled as peer_read_receipt_enabled
+                    p_peer.read_receipt_enabled as peer_read_receipt_enabled,
+                    COALESCE(
+                      (SELECT json_agg(json_build_object('userId', user_id, 'reaction', reaction))
+                       FROM message_reactions WHERE message_id = m.id),
+                      '[]'
+                    ) as reactions
              FROM messages m
              JOIN channels c ON m.channel_id = c.id
              LEFT JOIN messages rm ON m.reply_to_id = rm.id
              JOIN profiles p_peer ON (CASE WHEN m.sender_id = $2 THEN (CASE WHEN c.user1_id = $2 THEN c.user2_id ELSE c.user1_id END) ELSE m.sender_id END) = p_peer.user_id
              WHERE m.channel_id = $1
-             ORDER BY m.created_at DESC
+             ORDER BY m.created_at ASC
              LIMIT 200`,
             [channelId, userId]
         );
 
         res.json({
-            messages: result.rows.reverse().map(m => {
+            messages: result.rows.map(m => {
                 const isSentByMe = m.sender_id === userId;
-                // If I sent the message, hide read_at if the peer has disabled receipts
                 const readAt = (isSentByMe && m.peer_read_receipt_enabled === false) ? null : m.read_at;
                 
                 return {
@@ -194,7 +207,8 @@ router.get('/messages/:channelId', authMiddleware, async (req, res) => {
                     reply_to_id: m.reply_to_id,
                     reply_to_content: m.reply_to_content,
                     reply_to_sender_id: m.reply_to_sender_id,
-                    reply_to_message_type: m.reply_to_message_type
+                    reply_to_message_type: m.reply_to_message_type,
+                    reactions: typeof m.reactions === 'string' ? JSON.parse(m.reactions) : m.reactions
                 };
             })
         });
@@ -208,7 +222,7 @@ router.get('/messages/:channelId', authMiddleware, async (req, res) => {
 router.post('/send', authMiddleware, async (req, res) => {
     try {
         const senderId = req.userId;
-        const { channelId, content, message_type, duration, reply_to_id } = req.body;
+        const { channelId, content, message_type, duration, reply_to_id, clientTempId } = req.body;
 
         if (!channelId || !content || content.trim().length === 0) {
             return res.status(400).json({ error: 'channelId and content required' });
@@ -240,11 +254,27 @@ router.post('/send', authMiddleware, async (req, res) => {
             return res.status(403).json({ error: 'User is blocked' });
         }
 
+        // Check if peer is actively viewing this conversation for immediate read receipt
+        const io = socketManager.getIo();
+        let readAt = null;
+        
+        // We'll need a way to check active conversations globally. 
+        // I'll add a helper to server.js or export the map.
+        // For now, I'll check if the peer is online and we'll handle the 'read_at' update.
+        // Actually, let's just emit and let the client or server-side socket listener handle it.
+        // Better: check the map we created in server.js.
+        // I'll export activeConversations from server.js.
+        
+        const { activeConversations } = require('../state');
+        if (activeConversations && activeConversations.get(peerId.toString()) === channelId) {
+            readAt = new Date();
+        }
+
         const result = await db.query(
-            `INSERT INTO messages (channel_id, sender_id, content, message_type, duration, reply_to_id)
-             VALUES ($1, $2, $3, $4, $5, $6)
-             RETURNING id, created_at`,
-            [channelId, senderId, content.trim(), message_type || 'text', duration || null, reply_to_id || null]
+            `INSERT INTO messages (channel_id, sender_id, content, message_type, duration, reply_to_id, read_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)
+             RETURNING id, created_at, read_at`,
+            [channelId, senderId, content.trim(), message_type || 'text', duration || null, reply_to_id || null, readAt]
         );
 
         // Fetch reply context for broadcast if it exists
@@ -274,14 +304,14 @@ router.post('/send', authMiddleware, async (req, res) => {
             reply_to_id: reply_to_id || null,
             reply_to_content: replyContext?.content,
             reply_to_sender_id: replyContext?.sender_id,
-            reply_to_message_type: replyContext?.message_type
+            reply_to_message_type: replyContext?.message_type,
+            client_temp_id: clientTempId || null
         };
 
         // Emit to peer
-        const io = socketManager.getIo();
-        io.to(peerId).emit('new_message', message);
+        io.to(peerId.toString()).emit('new_message', message);
         // Also notify me to update my list preview/sorting
-        io.to(senderId).emit('new_message', message);
+        io.to(senderId.toString()).emit('new_message', message);
 
         // ── Streak Logic ──
         try {

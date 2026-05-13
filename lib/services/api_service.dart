@@ -258,7 +258,7 @@ class ApiService {
         .timeout(_timeout);
   }
 
-  static Future<http.Response> sendMessage(int channelId, String content, {String messageType = 'text', int? duration, int? replyToId}) async {
+  static Future<http.Response> sendMessage(int channelId, String content, {String messageType = 'text', int? duration, int? replyToId, String? clientTempId}) async {
     final headers = await authHeaders();
     return _client
         .post(Uri.parse('$baseUrl/whispers/send'),
@@ -268,7 +268,8 @@ class ApiService {
               'content': content,
               'message_type': messageType,
               'duration': duration,
-              'reply_to_id': replyToId
+              'reply_to_id': replyToId,
+              'clientTempId': clientTempId
             }))
         .timeout(_timeout);
   }

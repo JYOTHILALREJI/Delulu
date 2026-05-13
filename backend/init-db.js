@@ -138,6 +138,34 @@ async function initDb() {
       }
     }
 
+    // User columns for attention seeker
+    const userColumns = [
+      { name: 'attention_seeker_last_used', type: 'TIMESTAMPTZ' },
+      { name: 'attention_seeker_free_used', type: 'BOOLEAN DEFAULT FALSE' }
+    ];
+
+    for (const col of userColumns) {
+      try {
+        await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS ${col.name} ${col.type};`);
+        console.log(`  ✓ added ${col.name} to users (if missing)`);
+      } catch (e) {
+        console.error(`  ✕ error adding ${col.name}:`, e.message);
+      }
+    }
+
+    // Message reactions table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS message_reactions (
+        id SERIAL PRIMARY KEY,
+        message_id INTEGER REFERENCES messages(id) ON DELETE CASCADE,
+        user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+        reaction VARCHAR(10) NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(message_id, user_id)
+      );
+    `);
+    console.log('  ✓ message_reactions');
+
     // Add missing columns to games
     const gameColumns = [
       { name: 'is_premium', type: 'BOOLEAN DEFAULT FALSE' }

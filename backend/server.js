@@ -25,6 +25,9 @@ const PORT = process.env.PORT || 3000;
 // ── Socket.IO Setup ──
 const io = socketManager.init(server);
 
+// Track active conversation for realtime read receipts globally
+const { activeConversations } = require('./state');
+
 io.use((socket, next) => {
   const token = socket.handshake.auth.token;
   if (!token) return next(new Error('Auth error'));
@@ -105,37 +108,81 @@ io.on('connection', async (socket) => {
 
   socket.join(userId.toString());
 
-  // Fetch privacy settings
-  let onlineEnabled = true;
+  // Fetch privacy settings for initial socket tracking
+  let privacySettings = {
+    hiddenOnline: false,
+    hiddenTyping: false,
+    hiddenLastSeen: false,
+    hiddenLocation: false
+  };
   try {
-    const res = await db.query('SELECT online_status_enabled FROM profiles WHERE user_id = $1', [userId]);
+    const res = await db.query('SELECT online_status_enabled, typing_indicator_enabled, last_seen_enabled, hide_location_enabled FROM profiles WHERE user_id = $1', [userId]);
     if (res.rows.length > 0) {
-      onlineEnabled = res.rows[0].online_status_enabled !== false;
+      privacySettings = {
+        hiddenOnline: res.rows[0].online_status_enabled === false,
+        hiddenTyping: res.rows[0].typing_indicator_enabled === false,
+        hiddenLastSeen: res.rows[0].last_seen_enabled === false,
+        hiddenLocation: res.rows[0].hide_location_enabled === true
+      };
     }
   } catch (err) {
     console.error('Error fetching privacy settings:', err);
   }
 
-  // Track online status
-  if (onlineTracker.addSocket(userId, socket.id)) {
-    if (onlineEnabled) {
+  // Track online status with heartbeats
+  if (onlineTracker.addSocket(userId, socket.id, privacySettings)) {
+    if (!privacySettings.hiddenOnline) {
+      // Broadcast to everyone that I'm online, but recipients will check privacy too
       io.emit('user_status', { userId, status: 'online' });
     }
   }
 
-  socket.on('typing', async (data) => {
-    // data: { channelId, peerId, isTyping }
-    try {
-      const res = await db.query('SELECT typing_indicator_enabled FROM profiles WHERE user_id = $1', [userId]);
-      if (res.rows.length > 0 && res.rows[0].typing_indicator_enabled === false) {
-        return; // Don't broadcast if disabled
-      }
-      io.to(data.peerId.toString()).emit('typing_status', {
-        channelId: data.channelId,
-        userId: userId,
-        isTyping: data.isTyping
+  socket.on('presence:heartbeat', () => {
+    onlineTracker.updateHeartbeat(userId);
+  });
+
+  socket.on('conversation:viewing', (data) => {
+    // data: { channelId }
+    if (data && data.channelId) {
+      activeConversations.set(userId.toString(), data.channelId);
+      // Mark as read immediately when user enters the screen
+      db.query(
+        'UPDATE messages SET read_at = NOW() WHERE channel_id = $1 AND sender_id != $2 AND read_at IS NULL',
+        [data.channelId, userId]
+      ).then(() => {
+        io.to(userId.toString()).emit('unread_update', { channelId: data.channelId });
+        // Find peerId to notify them
+        db.query('SELECT user1_id, user2_id FROM channels WHERE id = $1', [data.channelId]).then(cRes => {
+          if (cRes.rows.length > 0) {
+            const peerId = cRes.rows[0].user1_id === userId ? cRes.rows[0].user2_id : cRes.rows[0].user1_id;
+            io.to(peerId.toString()).emit('message_read', { channelId: data.channelId, readerId: userId });
+          }
+        });
       });
-    } catch (err) {}
+    } else {
+      activeConversations.delete(userId.toString());
+    }
+  });
+
+  socket.on('typing:start', (data) => {
+    // data: { channelId, peerId }
+    if (privacySettings.hiddenTyping) return;
+    onlineTracker.updateTyping(userId, data.peerId);
+    io.to(data.peerId.toString()).emit('typing_status', {
+      channelId: data.channelId,
+      userId: userId,
+      isTyping: true
+    });
+  });
+
+  socket.on('typing:stop', (data) => {
+    // data: { channelId, peerId }
+    onlineTracker.updateTyping(userId, null);
+    io.to(data.peerId.toString()).emit('typing_status', {
+      channelId: data.channelId,
+      userId: userId,
+      isTyping: false
+    });
   });
 
   socket.on('attention_seeker', async (data) => {
@@ -149,43 +196,50 @@ io.on('connection', async (socket) => {
     }
 
     try {
-      // Fetch user's last use and premium status
+      // Fetch user's last use and premium status from the new users table columns
       const userRes = await db.query(
-        'SELECT last_attention_seeker_at, is_premium FROM profiles WHERE user_id = $1',
+        'SELECT attention_seeker_last_used, attention_seeker_free_used, is_premium_user FROM users WHERE id = $1',
         [userId]
       );
 
       if (userRes.rows.length > 0) {
-        const profile = userRes.rows[0];
-        if (profile.last_attention_seeker_at) {
-          if (!profile.is_premium) {
+        const u = userRes.rows[0];
+        const isPremium = u.is_premium_user === true;
+        const lastUsed = u.attention_seeker_last_used;
+        const freeUsed = u.attention_seeker_free_used === true;
+
+        if (!isPremium) {
+          if (freeUsed) {
             socket.emit('error_message', {
               message: 'Attention Seeker is a Premium feature after your first use. Upgrade to Rizz+ to continue!',
               type: 'attention_premium_required'
             });
             return;
           }
+        } else {
+          // Premium cooldown: 15 minutes
+          if (lastUsed) {
+            const lastUseDate = new Date(lastUsed);
+            const now = new Date();
+            const diffMs = now - lastUseDate;
+            const cooldownMs = 15 * 60 * 1000;
 
-          const lastUse = new Date(profile.last_attention_seeker_at);
-          const now = new Date();
-          const diffMs = now - lastUse;
-          const cooldownMs = 15 * 60 * 1000; // 15 minutes for Premium
-
-          if (diffMs < cooldownMs) {
-            socket.emit('error_message', {
-              message: 'Attention Seeker is on cooldown. Please wait before seeking attention again.',
-              type: 'attention_cooldown'
-            });
-            return;
+            if (diffMs < cooldownMs) {
+              socket.emit('error_message', {
+                message: 'Attention Seeker is on cooldown. Please wait before seeking attention again.',
+                type: 'attention_cooldown'
+              });
+              return;
+            }
           }
         }
       }
 
       console.log(`Attention seeker from ${userId} to ${peerId}`);
 
-      // Update last use in DB
+      // Update last use and mark free as used in users table
       await db.query(
-        'UPDATE profiles SET last_attention_seeker_at = NOW() WHERE user_id = $1',
+        'UPDATE users SET attention_seeker_last_used = NOW(), attention_seeker_free_used = TRUE WHERE id = $1',
         [userId]
       );
 
@@ -670,6 +724,34 @@ io.on('connection', async (socket) => {
     }
   });
 
+  socket.on('reaction:add', async (data) => {
+    // data: { messageId, reaction, peerId }
+    const { messageId, reaction, peerId } = data;
+    try {
+      await db.query(
+        'INSERT INTO message_reactions (message_id, user_id, reaction) VALUES ($1, $2, $3) ON CONFLICT (message_id, user_id) DO UPDATE SET reaction = EXCLUDED.reaction',
+        [messageId, userId, reaction]
+      );
+      io.to(peerId.toString()).to(userId.toString()).emit('reaction_updated', { messageId, userId, reaction, action: 'add' });
+    } catch (err) {
+      console.error('Reaction add error:', err);
+    }
+  });
+
+  socket.on('reaction:remove', async (data) => {
+    // data: { messageId, peerId }
+    const { messageId, peerId } = data;
+    try {
+      await db.query(
+        'DELETE FROM message_reactions WHERE message_id = $1 AND user_id = $2',
+        [messageId, userId]
+      );
+      io.to(peerId.toString()).to(userId.toString()).emit('reaction_updated', { messageId, userId, action: 'remove' });
+    } catch (err) {
+      console.error('Reaction remove error:', err);
+    }
+  });
+
   socket.on('disconnect', async () => {
     console.log(`User disconnected from socket: ${userId}`);
     if (onlineTracker.removeSocket(userId, socket.id)) {
@@ -726,3 +808,5 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`\n  Delulu API running on http://0.0.0.0:${PORT}`);
   console.log(`  Health: http://localhost:${PORT}/api/health\n`);
 });
+
+module.exports = { app, server, io };

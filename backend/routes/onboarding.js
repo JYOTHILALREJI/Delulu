@@ -26,7 +26,9 @@ router.put('/profile', authMiddleware, async (req, res) => {
       longitude,
       location_name,
       is_premium,
-      is_verified
+      is_verified,
+      e2e_encryption_enabled,
+      hide_location_enabled
     } = req.body;
 
     console.log(`[Onboarding] Saving profile for user ${userId}. Keys:`, Object.keys(req.body));
@@ -62,7 +64,9 @@ router.put('/profile', authMiddleware, async (req, res) => {
         latitude, 
         longitude, 
         location_name, 
-        is_premium
+        is_premium,
+        e2e_encryption_enabled,
+        hide_location_enabled
       ) VALUES (
         $17, 
         COALESCE($1, ''), 
@@ -80,7 +84,9 @@ router.put('/profile', authMiddleware, async (req, res) => {
         $13, 
         $14, 
         $15, 
-        COALESCE($16, FALSE)
+        COALESCE($16, FALSE),
+        COALESCE($18, FALSE),
+        COALESCE($19, FALSE)
       )
       ON CONFLICT (user_id) DO UPDATE SET
         display_name = COALESCE($1, profiles.display_name),
@@ -99,6 +105,8 @@ router.put('/profile', authMiddleware, async (req, res) => {
         longitude = COALESCE($14, profiles.longitude),
         location_name = COALESCE($15, profiles.location_name),
         is_premium = COALESCE($16, profiles.is_premium),
+        e2e_encryption_enabled = COALESCE($18, profiles.e2e_encryption_enabled),
+        hide_location_enabled = COALESCE($19, profiles.hide_location_enabled),
         updated_at = CURRENT_TIMESTAMP
       RETURNING *
     `, [
@@ -109,7 +117,9 @@ router.put('/profile', authMiddleware, async (req, res) => {
       last_seen_enabled, read_receipt_enabled, live_location_enabled,
       latitude, longitude, location_name,
       is_premium,
-      userId
+      userId,
+      e2e_encryption_enabled,
+      hide_location_enabled
     ]);
     
     console.log(`[Onboarding] Profile UPSERT completed. Rows affected: ${result.rowCount}`);

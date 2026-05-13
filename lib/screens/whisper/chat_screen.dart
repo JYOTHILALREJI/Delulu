@@ -20,65 +20,273 @@ import 'components/game_drawer.dart';
 import 'game_screen.dart';
 import '../../utils/encryption_helper.dart';
 
-Map<String, dynamic> _parseSingleMessage(Map<String, dynamic> msg) {
-  // Use a copy to avoid mutating the original if it's reused
-  final Map<String, dynamic> parsed = Map<String, dynamic>.from(msg);
-  
-  Object? content = parsed['content'];
-  String contentStr = "";
-  
-  if (content is String) {
-    contentStr = content;
-    if (contentStr.isNotEmpty && !parsed.containsKey('pending')) {
-      if (EncryptionHelper.isEncrypted(contentStr)) {
-        try {
-          contentStr = EncryptionHelper.decryptMessage(contentStr);
-          parsed['content'] = contentStr;
-        } catch (_) {}
-      }
-    }
-  } else if (content is Map) {
-    // If it's already a map, we might need to stringify it for consistent internal storage
-    // but usually we can just use it.
-    contentStr = jsonEncode(content);
-  }
-
-  if (parsed['created_at'] != null) {
+// ----- Helper to decrypt and parse a single message -----
+Map<String, dynamic> _parseSingleMessage(Map<String, dynamic> raw) {
+  final msg = Map<String, dynamic>.from(raw);
+  final content = msg['content'];
+  if (content is String && EncryptionHelper.isEncrypted(content)) {
     try {
-      final dt = DateTime.parse(parsed['created_at'].toString()).toLocal();
-      parsed['_parsed_date'] = dt;
-      parsed['_formatted_time'] = '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+      msg['content'] = EncryptionHelper.decryptMessage(content);
     } catch (_) {}
   }
-
-  if (parsed['message_type'] == 'game_status') {
+  // Parse date
+  if (msg['created_at'] != null) {
     try {
-      if (content is Map) {
-        parsed['_parsed_game_data'] = Map<String, dynamic>.from(content);
-      } else if (contentStr.isNotEmpty) {
-        final decoded = jsonDecode(contentStr);
-        if (decoded is Map) {
-          parsed['_parsed_game_data'] = Map<String, dynamic>.from(decoded);
-        } else {
-          parsed['_parsed_game_data'] = <String, dynamic>{};
-        }
-      }
-    } catch (e) {
-      print('[ChatScreen] Error parsing game data: $e');
-      parsed['_parsed_game_data'] = <String, dynamic>{};
+      final dt = DateTime.parse(msg['created_at'].toString()).toLocal();
+      msg['_parsed_date'] = dt;
+      msg['_formatted_time'] = '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+    } catch (_) {}
+  }
+  // Parse game status
+  if (msg['message_type'] == 'game_status') {
+    try {
+      final gameData = content is Map ? content : jsonDecode(content.toString());
+      msg['_parsed_game_data'] = gameData is Map ? gameData : {};
+    } catch (_) {
+      msg['_parsed_game_data'] = {};
     }
   }
-  
-  return parsed;
+  return msg;
 }
 
-Map<String, dynamic> _processMessagesResponse(String responseBody) {
-  final body = jsonDecode(responseBody) as Map<String, dynamic>;
-  final messages = body['messages'] as List<dynamic>? ?? [];
-  for (var i = 0; i < messages.length; i++) {
-    messages[i] = _parseSingleMessage(messages[i] as Map<String, dynamic>);
+// ----- Individual message bubble with ValueNotifier -----
+class _OptimizedChatBubble extends StatefulWidget {
+  final ValueNotifier<Map<String, dynamic>> messageNotifier;
+  final bool isMe;
+  final bool isFailed;
+  final bool isGrouped;
+  final double screenWidth;
+  final VoidCallback onReply;
+  final Function(String reaction) onReactionSelected;
+
+  final Function(Map<String, dynamic> msg) gameCardBuilder;
+
+  const _OptimizedChatBubble({
+    Key? key,
+    required this.messageNotifier,
+    required this.isMe,
+    required this.isFailed,
+    required this.isGrouped,
+    required this.screenWidth,
+    required this.onReply,
+    required this.onReactionSelected,
+    required this.gameCardBuilder,
+  }) : super(key: key);
+
+  @override
+  State<_OptimizedChatBubble> createState() => _OptimizedChatBubbleState();
+}
+
+class _OptimizedChatBubbleState extends State<_OptimizedChatBubble> {
+  double _dragExtent = 0.0;
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<Map<String, dynamic>>(
+      valueListenable: widget.messageNotifier,
+      builder: (context, msg, _) {
+        final type = msg['message_type'] ?? 'text';
+        final reactions = List<Map<String, dynamic>>.from(msg['reactions'] ?? []);
+        final isReply = msg['reply_to_id'] != null;
+
+        return GestureDetector(
+          onHorizontalDragUpdate: (details) {
+            setState(() {
+              _dragExtent += details.delta.dx;
+              if (_dragExtent > 0) _dragExtent = 0;
+              if (_dragExtent < -60) _dragExtent = -60;
+            });
+          },
+          onHorizontalDragEnd: (_) {
+            if (_dragExtent <= -60) {
+              widget.onReply();
+              HapticFeedback.lightImpact();
+            }
+            setState(() => _dragExtent = 0.0);
+          },
+          onLongPress: widget.isMe ? null : () => _showReactionPicker(context),
+          child: Transform.translate(
+            offset: Offset(_dragExtent, 0),
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                // Reply hint
+                if (_dragExtent < 0)
+                  Positioned(
+                    right: -40,
+                    top: 0,
+                    bottom: 0,
+                    child: Center(
+                      child: Opacity(
+                        opacity: (_dragExtent / -60).clamp(0.0, 1.0),
+                        child: Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: AppColors.primary.withOpacity(0.2),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.reply, color: AppColors.primary, size: 18),
+                        ),
+                      ),
+                    ),
+                  ),
+                // Bubble
+                Align(
+                  alignment: widget.isMe ? Alignment.centerRight : Alignment.centerLeft,
+                  child: Column(
+                    crossAxisAlignment: widget.isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                    children: [
+                      if (type == 'game_status')
+                        widget.gameCardBuilder(msg)
+                      else
+                        Container(
+                          margin: EdgeInsets.only(bottom: widget.isGrouped ? 2 : 10),
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                          constraints: BoxConstraints(maxWidth: widget.screenWidth * 0.75),
+                          decoration: BoxDecoration(
+                            gradient: widget.isMe
+                                ? const LinearGradient(
+                                    colors: [Color(0x4D8B5CF6), Color(0x268B5CF6)],
+                                    begin: Alignment.topLeft,
+                                    end: Alignment.bottomRight,
+                                  )
+                                : null,
+                            color: widget.isMe ? null : const Color(0x14FFFFFF),
+                            borderRadius: BorderRadius.only(
+                              topLeft: const Radius.circular(20),
+                              topRight: const Radius.circular(20),
+                              bottomLeft: Radius.circular(widget.isMe ? 20 : (widget.isGrouped ? 20 : 4)),
+                              bottomRight: Radius.circular(widget.isMe ? (widget.isGrouped ? 20 : 4) : 20),
+                            ),
+                            border: Border.all(color: Colors.white10, width: 0.5),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.12),
+                                blurRadius: 4,
+                                offset: const Offset(0, 2),
+                              )
+                            ],
+                          ),
+                          child: Column(
+                            crossAxisAlignment: widget.isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                            children: [
+                              if (isReply) _buildReplyPreview(msg),
+                              if (type == 'voice')
+                                VoiceMessageBubble(
+                                  content: msg['content'],
+                                  duration: msg['duration'] ?? 0,
+                                  isMe: widget.isMe,
+                                )
+                              else
+                                Text(
+                                  msg['content'] ?? '',
+                                  style: const TextStyle(fontSize: 15, color: Colors.white, height: 1.35),
+                                ),
+                              const SizedBox(height: 4),
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    msg['_formatted_time'] ?? '',
+                                    style: const TextStyle(fontSize: 10, color: Colors.white38),
+                                  ),
+                                  if (widget.isMe && !widget.isFailed) ...[
+                                    const SizedBox(width: 4),
+                                    Icon(
+                                      msg['read_at'] != null ? Icons.done_all : Icons.done,
+                                      size: 14,
+                                      color: msg['read_at'] != null ? Colors.blueAccent : Colors.white30,
+                                    ),
+                                  ],
+                                  if (widget.isFailed) ...[
+                                    const SizedBox(width: 4),
+                                    const Icon(Icons.error_outline, size: 12, color: Colors.redAccent),
+                                  ],
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      if (reactions.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: Wrap(
+                            spacing: 4,
+                            children: reactions.map((r) => Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF374151),
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(color: Colors.white10),
+                              ),
+                              child: Text(r['reaction'], style: const TextStyle(fontSize: 12)),
+                            )).toList(),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
-  return body;
+
+  void _showReactionPicker(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1F2937),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => Container(
+        padding: const EdgeInsets.all(20),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: ['❤️', '😂', '😮', '😢', '😡', '👍'].map((emoji) => GestureDetector(
+            onTap: () {
+              widget.onReactionSelected(emoji);
+              Navigator.pop(ctx);
+            },
+            child: Text(emoji, style: const TextStyle(fontSize: 32)),
+          )).toList(),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildReplyPreview(Map<String, dynamic> msg) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(8),
+        border: const Border(left: BorderSide(color: AppColors.primary, width: 3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            msg['reply_to_sender_id'].toString() == msg['sender_id'].toString() ? 'You' : 'Peer',
+            style: GoogleFonts.inter(color: AppColors.primary, fontWeight: FontWeight.bold, fontSize: 11),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            msg['reply_to_message_type'] == 'voice' ? '🎤 Voice message' : (msg['reply_to_content'] ?? ''),
+            style: GoogleFonts.inter(color: Colors.white60, fontSize: 11),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Temporary stub for game status card - will be updated to use actual logic
+  Widget _buildGameStatusCard(Map<String, dynamic> msg) {
+    return Container(); // Placeholder
+  }
 }
 
 class ChatScreen extends StatefulWidget {
@@ -104,7 +312,9 @@ class ChatScreen extends StatefulWidget {
 }
 
 class _ChatScreenState extends State<ChatScreen> {
-  List<Map<String, dynamic>> _messages = [];
+  final List<ValueNotifier<Map<String, dynamic>>> _messageNotifiers = [];
+  final Map<int, ValueNotifier<Map<String, dynamic>>> _notifierMap = {};
+  
   bool _isLoading = true;
   final TextEditingController _msgController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
@@ -118,7 +328,6 @@ class _ChatScreenState extends State<ChatScreen> {
   Timer? _typingTimer;
   
   bool _isPremium = false;
-  DateTime? _lastAttentionSeekerAt;
   bool _isAttentionCooldownActive = false;
   String _cooldownRemaining = "";
   Timer? _cooldownTimer;
@@ -128,14 +337,14 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _isRecording = false;
   bool _isRecordingCancelled = false;
   bool _isRecordingLocked = false;
-  String? _currentRecordingPath; // local recording path
+  String? _currentRecordingPath;
   int _recordingDuration = 0;
   Timer? _recordingTimer;
   Map<String, dynamic>? _replyingTo;
-  final Map<int, GlobalKey> _messageKeys = {};
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
   Duration _serverTimeOffset = Duration.zero;
+  DateTime? _lastAttentionSeekerAt;
 
   @override
   void initState() {
@@ -154,6 +363,9 @@ class _ChatScreenState extends State<ChatScreen> {
     _markRead();
     _initSocket();
 
+    // Notify server we are viewing this conversation for realtime read receipts
+    SocketService().emitConversationViewing(widget.channelId);
+
     _msgController.addListener(_onTypingChanged);
   }
 
@@ -165,7 +377,6 @@ class _ChatScreenState extends State<ChatScreen> {
         _currentUserId = cachedId;
       }
       
-      // Fast-track premium status from cache for immediate UI feedback
       if (mounted) {
         setState(() {
           _isPremium = prefs.getBool('is_premium') ?? false;
@@ -174,19 +385,24 @@ class _ChatScreenState extends State<ChatScreen> {
 
       final cachedMsgs = prefs.getString('chat_messages_${widget.channelId}');
       if (cachedMsgs != null) {
-        final body = await compute<String, dynamic>(_processMessagesResponse, cachedMsgs);
+        final body = await compute<String, dynamic>(jsonDecode, cachedMsgs);
+        final List<dynamic> raw = body['messages'] ?? [];
+        
+        final List<ValueNotifier<Map<String, dynamic>>> notifiers = [];
+        for (var m in raw) {
+          final parsed = _parseSingleMessage(m as Map<String, dynamic>);
+          final notifier = ValueNotifier(parsed);
+          notifiers.add(notifier);
+          _notifierMap[parsed['id']] = notifier;
+        }
+
         if (mounted) {
           setState(() {
-            _messages = List<Map<String, dynamic>>.from(body['messages'] ?? []);
-            // Sort DESC (newest first)
-            _messages.sort((a, b) {
-              final da = DateTime.tryParse(a['created_at'] ?? '') ?? DateTime(0);
-              final db = DateTime.tryParse(b['created_at'] ?? '') ?? DateTime(0);
-              return db.compareTo(da);
-            });
+            _messageNotifiers.clear();
+            _messageNotifiers.addAll(notifiers);
             _isLoading = false;
           });
-          _scrollToBottom(jump: true);
+          _scrollToBottom(animated: false);
         }
       }
     } catch (_) {
@@ -224,68 +440,91 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _initSocket() {
-    // Listen for new messages
-    SocketService().messageStream.listen((msg) {
-      if (mounted && msg['channel_id'] == widget.channelId) {
+    SocketService().messageStream.listen((rawMsg) {
+      if (rawMsg['channel_id'] != widget.channelId) return;
+
+      final msg = _parseSingleMessage(Map<String, dynamic>.from(rawMsg));
+
+      // CHECK FOR OPTIMISTIC MESSAGE
+      final incomingTempId = msg['client_temp_id'];
+
+      if (incomingTempId != null) {
+        final existing = _messageNotifiers.where((n) {
+          return n.value['client_temp_id'] == incomingTempId;
+        }).toList();
+
+        if (existing.isNotEmpty) {
+          // REPLACE optimistic bubble with real DB message
+          existing.first.value = msg;
+
+          // Update notifier map to use the real database ID
+          _notifierMap.remove(msg['id']); // Remove if it was accidentally added elsewhere
+          _notifierMap[msg['id']] = existing.first;
+
+          return;
+        }
+      }
+
+      // Prevent duplicate DB insert
+      final id = msg['id'];
+      if (_notifierMap.containsKey(id)) return;
+
+      final notifier = ValueNotifier(msg);
+
+      if (mounted) {
         setState(() {
-          final msgId = msg['id'] is int ? msg['id'] : (int.tryParse(msg['id']?.toString() ?? '') ?? 0);
-          if (msgId > 0 && !_messages.any((m) => m['id'] == msgId)) {
-            _messages.insert(0, _parseSingleMessage(Map<String, dynamic>.from(msg)));
-            // Deduplicate immediately just in case
-            final seen = <int>{};
-            _messages.retainWhere((m) => seen.add(m['id'] as int));
-          }
+          _messageNotifiers.add(notifier);
+          _notifierMap[id] = notifier;
         });
-        if (msg['sender_id'] != _currentUserId) {
+
+        if (msg['sender_id'].toString() != _currentUserId.toString()) {
           _markRead();
+          SocketService().emitConversationViewing(widget.channelId);
+        }
+        _scrollToBottom();
+      }
+    });
+
+    SocketService().readReceiptStream.listen((data) {
+      if (!mounted || data['channelId'] != widget.channelId) return;
+
+      final readAt = data['readAt'] ?? DateTime.now().toIso8601String();
+
+      for (final notifier in _messageNotifiers) {
+        final msg = notifier.value;
+
+        final isMyMessage =
+            msg['sender_id'].toString() == _currentUserId.toString();
+
+        if (isMyMessage && msg['read_at'] == null) {
+          notifier.value = {
+            ...msg,
+            'read_at': readAt,
+          };
         }
       }
     });
 
-    // Listen for read receipts - update in place, no full reload
-    SocketService().readReceiptStream.listen((data) {
-      if (mounted && data['channelId'] == widget.channelId) {
-        setState(() {
-          for (final m in _messages) {
-            if (m['read_at'] == null && m['sender_id'].toString() == _currentUserId) {
-              m['read_at'] = data['readAt'] ?? DateTime.now().toIso8601String();
-            }
-          }
-        });
-      }
-    });
-
-    // Listen for message updates
     SocketService().messageUpdateStream.listen((data) {
       if (mounted && data['channel_id'] == widget.channelId) {
-        setState(() {
-          final index = _messages.indexWhere((m) => m['id'] == data['id']);
-          if (index != -1) {
-            _messages[index] = _parseSingleMessage(Map<String, dynamic>.from(data));
-          }
-        });
+        final updated = _parseSingleMessage(Map<String, dynamic>.from(data));
+        final notifier = _notifierMap[updated['id']];
+        if (notifier != null) notifier.value = updated;
       }
     });
 
-    // Listen for typing status
     SocketService().typingStream.listen((data) {
-      if (mounted && data['channelId'] == widget.channelId) {
-        setState(() {
-          _isPeerTyping = data['isTyping'];
-        });
+      if (mounted && data['channelId'] == widget.channelId && data['userId'].toString() == widget.peerId) {
+        setState(() => _isPeerTyping = data['isTyping']);
       }
     });
 
-    // Listen for online status
     SocketService().statusStream.listen((data) {
       if (mounted && data['userId'] == widget.peerId) {
-        setState(() {
-          _isPeerOnline = data['status'] == 'online';
-        });
+        setState(() => _isPeerOnline = data['status'] == 'online');
       }
     });
 
-    // Listen for attention seeker
     SocketService().attentionStream.listen((data) {
       if (mounted) {
         _triggerVibration();
@@ -293,18 +532,36 @@ class _ChatScreenState extends State<ChatScreen> {
       }
     });
 
-    // Listen for errors
     SocketService().errorStream.listen((data) {
       if (mounted) {
         if (data['type'] == 'attention_cooldown') {
           _showCustomToast(data['message'], isError: true);
+          _startCooldownTimer();
         } else if (data['type'] == 'attention_premium_required') {
           _showCustomToast(data['message'], isError: true);
           setState(() => _isAttentionCooldownActive = true);
         } else {
           _showCustomToast(data['message'], isError: true);
         }
-        _fetchCurrentUser(); // Refresh to get correct timestamp
+        _fetchCurrentUser();
+      }
+    });
+
+    SocketService().reactionStream.listen((data) {
+      if (!mounted) return;
+      final notifier = _notifierMap[data['messageId']];
+      if (notifier != null) {
+        final msg = notifier.value;
+        final reactions = List<Map<String, dynamic>>.from(msg['reactions'] ?? []);
+        if (data['action'] == 'add') {
+          final idx = reactions.indexWhere((r) => r['userId'] == data['userId']);
+          if (idx != -1) reactions[idx]['reaction'] = data['reaction'];
+          else reactions.add({'userId': data['userId'], 'reaction': data['reaction']});
+        } else if (data['action'] == 'remove') {
+          reactions.removeWhere((r) => r['userId'] == data['userId']);
+        }
+        msg['reactions'] = reactions;
+        notifier.value = {...msg};
       }
     });
 
@@ -424,7 +681,7 @@ class _ChatScreenState extends State<ChatScreen> {
         peerId: widget.peerId,
         peerName: widget.peerName,
         onReturnFromGame: _loadMessages,
-        initialMessageCount: _messages.length,
+        initialMessageCount: _messageNotifiers.length,
         isPeerOnline: _isPeerOnline,
       ),
     );
@@ -469,26 +726,25 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  bool _wasEmpty = true;
+  bool _wasTyping = false;
   void _onTypingChanged() {
     if (!_typingIndicatorEnabled) return;
     
-    if (_typingTimer?.isActive ?? false) _typingTimer!.cancel();
-    
-    final isEmpty = _msgController.text.trim().isEmpty;
-    if (isEmpty != _wasEmpty) {
-      setState(() => _wasEmpty = isEmpty);
+    final isNotEmpty = _msgController.text.trim().isNotEmpty;
+    if (isNotEmpty != _wasTyping) {
+      _wasTyping = isNotEmpty;
+      SocketService().emitTyping(widget.channelId, widget.peerId, isNotEmpty);
     }
 
-    // Emit "typing" if text is not empty
-    if (!isEmpty) {
-      SocketService().emitTyping(widget.channelId, widget.peerId, true);
-      
-      _typingTimer = Timer(const Duration(seconds: 2), () {
-        SocketService().emitTyping(widget.channelId, widget.peerId, false);
+    // Auto-stop typing if no changes for 3 seconds (as fallback to server expiry)
+    _typingTimer?.cancel();
+    if (isNotEmpty) {
+      _typingTimer = Timer(const Duration(seconds: 3), () {
+        if (mounted && _wasTyping) {
+          _wasTyping = false;
+          SocketService().emitTyping(widget.channelId, widget.peerId, false);
+        }
       });
-    } else {
-      SocketService().emitTyping(widget.channelId, widget.peerId, false);
     }
   }
 
@@ -498,6 +754,9 @@ class _ChatScreenState extends State<ChatScreen> {
     if (SocketService().activeChatPeerId == widget.peerId) {
       SocketService().activeChatPeerId = null;
     }
+    // Notify server we stopped viewing this conversation
+    SocketService().emitConversationViewing(null);
+
     _msgController.removeListener(_onTypingChanged);
     _msgController.dispose();
     _scrollController.dispose();
@@ -557,28 +816,26 @@ class _ChatScreenState extends State<ChatScreen> {
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString('chat_messages_${widget.channelId}', res.body);
         
-        final body = await compute<String, dynamic>(_processMessagesResponse, res.body);
+        final body = await compute<String, dynamic>(jsonDecode, res.body);
+        final List<dynamic> raw = body['messages'] ?? [];
+        
+        final List<ValueNotifier<Map<String, dynamic>>> notifiers = [];
+        _notifierMap.clear();
+
+        for (var m in raw) {
+          final parsed = _parseSingleMessage(m as Map<String, dynamic>);
+          final notifier = ValueNotifier(parsed);
+          notifiers.add(notifier);
+          _notifierMap[parsed['id']] = notifier;
+        }
+
         if (mounted) {
           setState(() {
-            // Deduplicate and ensure DESC order (newest at index 0)
-            final List<dynamic> raw = body['messages'] ?? [];
-            final Map<int, Map<String, dynamic>> deduped = {};
-            
-            for (var m in raw) {
-              final id = m['id'] is int ? m['id'] : (int.tryParse(m['id']?.toString() ?? '') ?? 0);
-              if (id > 0) deduped[id] = Map<String, dynamic>.from(m);
-            }
-            
-            _messages = deduped.values.toList();
-            // Sort DESC (newest first)
-            _messages.sort((a, b) {
-              final da = DateTime.tryParse(a['created_at'] ?? '') ?? DateTime(0);
-              final db = DateTime.tryParse(b['created_at'] ?? '') ?? DateTime(0);
-              return db.compareTo(da);
-            });
-            
+            _messageNotifiers.clear();
+            _messageNotifiers.addAll(notifiers);
             _isLoading = false;
           });
+          _scrollToBottom(animated: false);
         }
       } else {
         if (mounted) setState(() => _isLoading = false);
@@ -588,18 +845,20 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  void _scrollToBottom({bool jump = false}) {
+  void _scrollToBottom({bool animated = true}) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients) {
-        if (jump) {
-          _scrollController.jumpTo(0.0);
-        } else {
-          _scrollController.animateTo(
-            0.0,
-            duration: const Duration(milliseconds: 300),
-            curve: Curves.easeOut,
-          );
-        }
+      if (!_scrollController.hasClients) return;
+
+      final position = _scrollController.position.maxScrollExtent;
+
+      if (animated) {
+        _scrollController.animateTo(
+          position,
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeOut,
+        );
+      } else {
+        _scrollController.jumpTo(position);
       }
     });
   }
@@ -610,9 +869,10 @@ class _ChatScreenState extends State<ChatScreen> {
     _msgController.clear();
     FocusScope.of(context).unfocus();
 
-    // Optimistically add message
-    final tempMessage = _parseSingleMessage({
-      'id': DateTime.now().millisecondsSinceEpoch,
+    final tempId = 'temp_${DateTime.now().millisecondsSinceEpoch}';
+    final tempMsg = _parseSingleMessage({
+      'id': tempId,
+      'client_temp_id': tempId,
       'sender_id': _currentUserId,
       'content': text,
       'created_at': DateTime.now().toIso8601String(),
@@ -623,55 +883,39 @@ class _ChatScreenState extends State<ChatScreen> {
       'reply_to_message_type': _replyingTo?['message_type'],
     });
 
+    final notifier = ValueNotifier(tempMsg);
     final replyToId = _replyingTo?['id'];
+
     setState(() {
-      _messages.insert(0, tempMessage);
+      _messageNotifiers.add(notifier);
+      // We don't put temp ID in notifierMap because we want the real ID 
+      // from the socket/API to be the authoritative key
       _replyingTo = null;
     });
     _scrollToBottom();
 
     try {
-      final res = await ApiService.sendMessage(widget.channelId, text, replyToId: replyToId);
+      final res = await ApiService.sendMessage(
+        widget.channelId, 
+        text, 
+        replyToId: replyToId,
+        clientTempId: tempId,
+      );
       if (res.statusCode == 200) {
-        final body = await compute<String, dynamic>(jsonDecode, res.body);
-        // Replace temp message with server one
-        setState(() {
-          final index = _messages.indexWhere((m) => m['id'] == tempMessage['id']);
-          final serverId = body['message']['id'] is int ? body['message']['id'] : (int.tryParse(body['message']['id']?.toString() ?? '') ?? 0);
-          
-          if (index != -1) {
-            // Check if socket already inserted this serverId
-            final existingIndex = _messages.indexWhere((m) => m['id'] == serverId);
-            if (existingIndex != -1 && existingIndex != index) {
-              _messages.removeAt(index); // Just remove temp
-            } else {
-              _messages[index] = _parseSingleMessage({
-                ...body['message'],
-                'sender_id': body['message']['sender_id'],
-              });
-            }
-          }
-          
-          // Final safety deduplication
-          final seen = <int>{};
-          _messages.retainWhere((m) => seen.add(m['id'] as int));
-        });
+        final body = jsonDecode(res.body);
+        final serverMsg = _parseSingleMessage(body['message']);
+        final serverId = serverMsg['id'] as int;
+        
+        // Update the optimistic notifier with real data
+        notifier.value = serverMsg;
+        _notifierMap[serverId] = notifier;
       } else {
-        // Mark as failed
-        setState(() {
-          final index = _messages.indexWhere((m) => m['id'] == tempMessage['id']);
-          if (index != -1) {
-            _messages[index]['failed'] = true;
-          }
-        });
+        notifier.value['failed'] = true;
+        notifier.value = {...notifier.value};
       }
     } catch (_) {
-      setState(() {
-        final index = _messages.indexWhere((m) => m['id'] == tempMessage['id']);
-        if (index != -1) {
-          _messages[index]['failed'] = true;
-        }
-      });
+      notifier.value['failed'] = true;
+      notifier.value = {...notifier.value};
     }
   }
 
@@ -742,9 +986,10 @@ class _ChatScreenState extends State<ChatScreen> {
       final bytes = await file.readAsBytes();
       final base64Audio = 'data:audio/m4a;base64,${await compute(base64Encode, bytes)}';
 
-      // Optimistically add message
-      final tempMessage = _parseSingleMessage({
-        'id': -(DateTime.now().millisecondsSinceEpoch),
+      final tempId = 'temp_${DateTime.now().millisecondsSinceEpoch}';
+      final tempMsg = _parseSingleMessage({
+        'id': tempId,
+        'client_temp_id': tempId,
         'sender_id': _currentUserId,
         'content': base64Audio,
         'message_type': 'voice',
@@ -752,8 +997,10 @@ class _ChatScreenState extends State<ChatScreen> {
         'created_at': DateTime.now().toIso8601String(),
         'pending': true,
       });
+
+      final notifier = ValueNotifier(tempMsg);
       setState(() {
-        _messages.insert(0, tempMessage);
+        _messageNotifiers.add(notifier);
       });
       _scrollToBottom();
 
@@ -761,45 +1008,24 @@ class _ChatScreenState extends State<ChatScreen> {
         widget.channelId, 
         base64Audio, 
         messageType: 'voice', 
-        duration: duration
+        duration: duration,
+        clientTempId: tempId,
       );
 
       if (res.statusCode == 200) {
         final body = await compute<String, dynamic>(jsonDecode, res.body);
-        setState(() {
-          final index = _messages.indexWhere((m) => m['id'] == tempMessage['id']);
-          final serverId = body['message']['id'] is int ? body['message']['id'] : (int.tryParse(body['message']['id']?.toString() ?? '') ?? 0);
-          
-          if (index != -1) {
-            final existingIndex = _messages.indexWhere((m) => m['id'] == serverId);
-            if (existingIndex != -1 && existingIndex != index) {
-              _messages.removeAt(index);
-            } else {
-              _messages[index] = _parseSingleMessage({
-                ...body['message'],
-                'sender_id': body['message']['sender_id'],
-              });
-            }
-          }
-          
-          final seen = <int>{};
-          _messages.retainWhere((m) => seen.add(m['id'] as int));
-        });
+        final serverMsg = _parseSingleMessage(body['message']);
+        final serverId = serverMsg['id'] as int;
+        
+        notifier.value = serverMsg;
+        _notifierMap[serverId] = notifier;
       } else {
-        setState(() {
-          final index = _messages.indexWhere((m) => m['id'] == tempMessage['id']);
-          if (index != -1) _messages[index]['failed'] = true;
-        });
+        notifier.value['failed'] = true;
+        notifier.value = {...notifier.value};
       }
     } catch (e) {
       print('Error sending voice message: $e');
     }
-  }
-
-  void _startCooldownTimer() {
-    _cooldownTimer?.cancel();
-    _checkCooldown();
-    _cooldownTimer = Timer.periodic(const Duration(seconds: 10), (_) => _checkCooldown());
   }
 
   void _checkCooldown() {
@@ -808,24 +1034,21 @@ class _ChatScreenState extends State<ChatScreen> {
     final nowServer = DateTime.now().add(_serverTimeOffset);
     final lastUse = _lastAttentionSeekerAt!;
     final diff = nowServer.difference(lastUse);
-    final cooldown = _isPremium ? const Duration(minutes: 10) : const Duration(days: 9999);
+    final cooldown = _isPremium ? const Duration(minutes: 15) : const Duration(days: 9999);
 
     if (diff < cooldown) {
       final remaining = cooldown - diff;
       String label;
       if (!_isPremium) {
-        label = 'Rizz+ required';
-      } else if (remaining.inDays > 0 && remaining.inDays < 365) {
-        label = '${remaining.inDays}d ${remaining.inHours % 24}h';
+        label = 'Premium Locked';
       } else if (remaining.inHours > 0) {
         label = '${remaining.inHours}h ${remaining.inMinutes % 60}m';
       } else if (remaining.inMinutes > 0) {
         label = '${remaining.inMinutes}m ${remaining.inSeconds % 60}s';
-        _cooldownTimer?.cancel();
-        _cooldownTimer = Timer.periodic(const Duration(seconds: 1), (_) => _checkCooldown());
       } else {
         label = '${remaining.inSeconds}s';
       }
+      
       if (label != _cooldownRemaining || !_isAttentionCooldownActive) {
         setState(() {
           _isAttentionCooldownActive = true;
@@ -839,34 +1062,7 @@ class _ChatScreenState extends State<ChatScreen> {
           _cooldownRemaining = '';
         });
       }
-      _cooldownTimer?.cancel();
     }
-  }
-
-  void _handleAttentionSeeker() {
-    if (_isAttentionCooldownActive) {
-      if (!_isPremium) {
-        _showCustomToast('Attention Seeker is a Premium feature after your first use. Upgrade to Rizz+!', isError: true);
-      } else {
-        _showCustomToast('Cooldown active: $_cooldownRemaining', isError: true);
-      }
-      return;
-    }
-
-    if (!_isPeerOnline) {
-      _showCustomToast('${widget.peerName} is currently offline. You can only seek attention when they are online!', isError: true);
-      return;
-    }
-
-    _triggerVibration();
-    SocketService().emitAttentionSeeker(widget.peerId);
-    
-    setState(() {
-      _lastAttentionSeekerAt = DateTime.now();
-      _isAttentionCooldownActive = true;
-    });
-    _startCooldownTimer();
-    _showCustomToast('Seeking attention...');
   }
 
   void _showBlockConfirmation() {
@@ -1206,29 +1402,55 @@ class _ChatScreenState extends State<ChatScreen> {
                         : RepaintBoundary(
                             child: ListView.builder(
                             controller: _scrollController,
-                            reverse: true,
+                            reverse: false,
                             physics: const BouncingScrollPhysics(
                               parent: AlwaysScrollableScrollPhysics(),
                             ),
                             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
-                            itemCount: _messages.length,
+                            itemCount: _messageNotifiers.length + (_e2eEnabled ? 1 : 0),
                             cacheExtent: 800,
                             addAutomaticKeepAlives: false,
                             addRepaintBoundaries: true,
                             itemBuilder: (context, index) {
-                              final msg = _messages[index];
-                              final id = msg['id'] is int ? msg['id'] : (int.tryParse(msg['id']?.toString() ?? '') ?? 0);
-                              if (!_messageKeys.containsKey(id)) {
-                                _messageKeys[id] = GlobalKey();
+                              if (_e2eEnabled && index == _messageNotifiers.length) {
+                                // Encryption Notice
+                                return Center(
+                                  child: Container(
+                                    margin: const EdgeInsets.symmetric(vertical: 24, horizontal: 32),
+                                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white.withOpacity(0.03),
+                                      borderRadius: BorderRadius.circular(16),
+                                      border: Border.all(color: Colors.white.withOpacity(0.05)),
+                                    ),
+                                    child: Column(
+                                      children: [
+                                        const Icon(Icons.lock_outline_rounded, color: Colors.white24, size: 20),
+                                        const SizedBox(height: 8),
+                                        Text(
+                                          'Messages are end-to-end encrypted. No one outside of this chat, not even Delulu, can read them.',
+                                          textAlign: TextAlign.center,
+                                          style: GoogleFonts.inter(
+                                            fontSize: 11,
+                                            color: Colors.white38,
+                                            height: 1.4,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                );
                               }
 
+                              final notifier = _messageNotifiers[index];
+                              final msg = notifier.value;
+                              
                               final isMe = msg['sender_id'].toString() == _currentUserId.toString();
                               final isFailed = msg['failed'] == true;
-                              final type = msg['message_type'] ?? 'text';
-
+                              
                               bool isGrouped = false;
                               if (index > 0) {
-                                final youngerMsg = _messages[index - 1];
+                                final youngerMsg = _messageNotifiers[index - 1].value;
                                 if (youngerMsg['sender_id'].toString() == msg['sender_id'].toString()) {
                                   final currDate = msg['_parsed_date'] as DateTime?;
                                   final youngerDate = youngerMsg['_parsed_date'] as DateTime?;
@@ -1241,10 +1463,10 @@ class _ChatScreenState extends State<ChatScreen> {
                               }
 
                               bool showDateDivider = false;
-                              if (index == _messages.length - 1) {
+                              if (index == _messageNotifiers.length - 1) {
                                 showDateDivider = true;
                               } else {
-                                final olderMsg = _messages[index + 1];
+                                final olderMsg = _messageNotifiers[index + 1].value;
                                 final olderDate = olderMsg['_parsed_date'] as DateTime?;
                                 final currDate = msg['_parsed_date'] as DateTime?;
                                 if (olderDate != null && currDate != null) {
@@ -1254,27 +1476,18 @@ class _ChatScreenState extends State<ChatScreen> {
                                 }
                               }
 
-                              Widget content;
-                              if (type == 'game_status') {
-                                content = Center(
-                                  key: _messageKeys[id],
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(vertical: 12),
-                                    child: _buildGameStatusCard(msg),
-                                  ),
-                                );
-                              } else {
-                                content = _ChatBubble(
-                                  key: _messageKeys[id],
-                                  msg: msg,
-                                  isMe: isMe,
-                                  isFailed: isFailed,
-                                  isGrouped: isGrouped,
-                                  screenWidth: MediaQuery.of(context).size.width,
-                                  onReply: (m) => setState(() => _replyingTo = m),
-                                  onScrollToMessage: _scrollToMessage,
-                                );
-                              }
+                              final content = _OptimizedChatBubble(
+                                messageNotifier: notifier,
+                                isMe: isMe,
+                                isFailed: isFailed,
+                                isGrouped: isGrouped,
+                                screenWidth: MediaQuery.of(context).size.width,
+                                onReply: () => setState(() => _replyingTo = msg),
+                                onReactionSelected: (reaction) {
+                                  SocketService().emitReactionAdd(msg['id'], reaction, widget.peerId);
+                                },
+                                gameCardBuilder: _buildGameStatusCard,
+                              );
 
                               if (showDateDivider) {
                                 return Column(
@@ -1385,6 +1598,7 @@ class _ChatScreenState extends State<ChatScreen> {
                                 onLongPress: _startRecording,
                                 onLongPressMoveUpdate: (details) {
                                   if (_isRecording && !_isRecordingLocked) {
+                                    // Horizontal swipe to cancel
                                     if (details.offsetFromOrigin.dx < -80) {
                                       if (!_isRecordingCancelled) {
                                         setState(() => _isRecordingCancelled = true);
@@ -1396,16 +1610,18 @@ class _ChatScreenState extends State<ChatScreen> {
                                       }
                                     }
                                     
+                                    // Vertical swipe to lock
                                     if (details.offsetFromOrigin.dy < -80) {
                                       setState(() {
                                         _isRecordingLocked = true;
                                         _isRecordingCancelled = false;
                                       });
                                       _triggerVibrationShort();
+                                      _showCustomToast('Recording locked', isError: false);
                                     }
                                   }
                                 },
-                                onLongPressUp: () {
+                                onLongPressEnd: (details) {
                                   if (!_isRecordingLocked) {
                                     _stopRecording();
                                   }
@@ -1763,234 +1979,43 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  void _scrollToMessage(int id) {
-    final key = _messageKeys[id];
-    if (key != null && key.currentContext != null) {
-      Scrollable.ensureVisible(
-        key.currentContext!,
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeInOut,
-      );
-    }
+  void _handleAttentionSeeker() {
+    if (_isAttentionCooldownActive) return;
+    SocketService().emitAttentionSeeker(widget.peerId);
+    HapticFeedback.heavyImpact();
   }
 
+  void _startCooldownTimer() {
+    _cooldownTimer?.cancel();
+    _cooldownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      _fetchCurrentUser(); // Keep it simple: refresh user state to get cooldown
+      timer.cancel(); // Stop after one refresh, we can rely on periodic refresh or socket
+    });
+  }
+
+  void _scrollToMessage(int id) {
+    // Basic implementation: find index and scroll
+    final index = _messageNotifiers.indexWhere((n) => n.value['id'] == id);
+    if (index != -1 && _scrollController.hasClients) {
+       // Estimate height - not perfect but works for simple lists
+       _scrollController.animateTo(
+         index * 100.0, 
+         duration: const Duration(milliseconds: 300),
+         curve: Curves.easeInOut,
+       );
+    }
+  }
 }
 
 final _bubbleShadow = [
   BoxShadow(color: Colors.black.withOpacity(0.12), blurRadius: 4, offset: const Offset(0, 2)),
 ];
 final _bubbleBorder = Border.all(color: Colors.white10, width: 0.5);
-const _meGradientColors = [Color(0x4D8B5CF6), Color(0x268B5CF6)]; 
 const _theirColor = Color(0x14FFFFFF); 
-
-class _ChatBubble extends StatefulWidget {
-  final Map<String, dynamic> msg;
-  final bool isMe;
-  final bool isFailed;
-  final bool isGrouped;
-  final double screenWidth;
-  final Function(Map<String, dynamic>) onReply;
-  final Function(int) onScrollToMessage;
-
-  const _ChatBubble({
-    super.key,
-    required this.msg,
-    required this.isMe,
-    required this.isFailed,
-    required this.isGrouped,
-    required this.screenWidth,
-    required this.onReply,
-    required this.onScrollToMessage,
-  });
-
-  @override
-  State<_ChatBubble> createState() => _ChatBubbleState();
-}
-
-class _ChatBubbleState extends State<_ChatBubble> with SingleTickerProviderStateMixin {
-  double _dragExtent = 0.0;
-  late AnimationController _pulseController;
-
-  @override
-  void initState() {
-    super.initState();
-    _pulseController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1500),
-    );
-  }
-
-  @override
-  void dispose() {
-    _pulseController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final msg = widget.msg;
-    final isMe = widget.isMe;
-    final isFailed = widget.isFailed;
-    final isGrouped = widget.isGrouped;
-    final screenWidth = widget.screenWidth;
-    final type = msg['message_type'] ?? 'text';
-    final m = msg;
-
-    return GestureDetector(
-      onHorizontalDragUpdate: (details) {
-        setState(() {
-          _dragExtent += details.delta.dx;
-          if (_dragExtent > 0) _dragExtent = 0;
-          if (_dragExtent < -60) _dragExtent = -60;
-        });
-      },
-      onHorizontalDragEnd: (details) {
-        if (_dragExtent <= -60) {
-          widget.onReply(msg);
-          HapticFeedback.lightImpact();
-        }
-        setState(() => _dragExtent = 0.0);
-      },
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        transform: Matrix4.translationValues(_dragExtent, 0, 0),
-        child: Stack(
-          clipBehavior: Clip.none,
-          children: [
-            Positioned(
-              right: -40,
-              top: 0,
-              bottom: 0,
-              child: Center(
-                child: Opacity(
-                  opacity: (_dragExtent / -60).clamp(0.0, 1.0),
-                  child: Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: AppColors.primary.withOpacity(0.2),
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(Icons.reply, color: AppColors.primary, size: 18),
-                  ),
-                ),
-              ),
-            ),
-            Align(
-              alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
-              child: Container(
-                margin: EdgeInsets.only(bottom: isGrouped ? 2 : 10),
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                constraints: BoxConstraints(maxWidth: screenWidth * 0.75),
-                decoration: BoxDecoration(
-                  gradient: isMe
-                      ? const LinearGradient(
-                          colors: _meGradientColors,
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        )
-                      : null,
-                  color: isMe ? null : _theirColor,
-                  borderRadius: BorderRadius.only(
-                    topLeft: const Radius.circular(20),
-                    topRight: const Radius.circular(20),
-                    bottomLeft: Radius.circular(isMe ? 20 : (isGrouped ? 20 : 4)),
-                    bottomRight: Radius.circular(isMe ? (isGrouped ? 20 : 4) : 20),
-                  ),
-                  border: _bubbleBorder,
-                  boxShadow: _bubbleShadow,
-                ),
-                child: Column(
-                  crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (msg['reply_to_id'] != null)
-                      GestureDetector(
-                        onTap: () {
-                          final rId = msg['reply_to_id'] is int ? msg['reply_to_id'] : int.tryParse(msg['reply_to_id'].toString());
-                          if (rId != null) widget.onScrollToMessage(rId);
-                        },
-                        child: Container(
-                          margin: const EdgeInsets.only(bottom: 8),
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.05),
-                            borderRadius: BorderRadius.circular(8),
-                            border: const Border(
-                              left: BorderSide(color: AppColors.primary, width: 3),
-                            ),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                msg['reply_to_sender_id'].toString() == widget.msg['sender_id'].toString() ? 'You' : 'Peer',
-                                style: GoogleFonts.inter(
-                                  color: AppColors.primary,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 11,
-                                ),
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                msg['reply_to_message_type'] == 'voice' ? '🎤 Voice message' : (msg['reply_to_content'] ?? ''),
-                                style: GoogleFonts.inter(
-                                  color: Colors.white60,
-                                  fontSize: 11,
-                                ),
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    if (type == 'voice')
-                      VoiceMessageBubble(
-                        content: msg['content'],
-                        duration: msg['duration'] ?? 0,
-                        isMe: isMe,
-                      )
-                    else
-                      Text(
-                        msg['content'] ?? '',
-                        style: const TextStyle(
-                          fontSize: 15,
-                          color: Colors.white,
-                          height: 1.35,
-                        ),
-                      ),
-                    const SizedBox(height: 4),
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          msg['_formatted_time'] ?? '',
-                          style: const TextStyle(fontSize: 10, color: Colors.white38),
-                        ),
-                        if (isMe && !isFailed) ...[
-                          const SizedBox(width: 4),
-                          Icon(
-                            m['read_at'] != null ? Icons.done_all : Icons.done,
-                            size: 14,
-                            color: m['read_at'] != null ? Colors.blueAccent : Colors.white30,
-                          ),
-                        ],
-                        if (isFailed) ...[
-                          const SizedBox(width: 4),
-                          const Icon(Icons.error_outline, size: 12, color: Colors.redAccent),
-                        ],
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
 
 class VoiceMessageBubble extends StatefulWidget {
   final String content;
