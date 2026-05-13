@@ -58,7 +58,7 @@ class _HomeScreenState extends State<HomeScreen> {
   void _initSocket() {
     SocketService().connect();
     // Listen for events that should trigger a refresh of the global notification counts
-    SocketService().unreadStream.listen((_) => _fetchNotifications());
+    SocketService().messageStatusStream.listen((_) => _fetchNotifications());
     SocketService().messageStream.listen((_) => _fetchNotifications());
   }
 

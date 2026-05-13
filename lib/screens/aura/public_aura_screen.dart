@@ -283,6 +283,7 @@ class _PublicAuraScreenState extends State<PublicAuraScreen> {
     final int age = _profile!['age'] ?? 0;
     final String bio = _profile!['bio'] ?? 'Delulu Dreamer';
     final List<dynamic> photos = _profile!['photos'] ?? [];
+    final List<dynamic> interests = _profile!['interests'] ?? [];
 
     return PopScope(
       canPop: true,
@@ -421,6 +422,10 @@ class _PublicAuraScreenState extends State<PublicAuraScreen> {
                         
                         const SizedBox(height: 20),
                         _buildBioSection(bio),
+                        if (interests.isNotEmpty) ...[
+                          const SizedBox(height: 24),
+                          _buildInterestsSection(interests),
+                        ],
                       ],
                     ),
                   ),
@@ -705,6 +710,73 @@ class _PublicAuraScreenState extends State<PublicAuraScreen> {
               ],
             ),
           ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildInterestsSection(List<dynamic> interests) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Container(
+              width: 12,
+              height: 2,
+              decoration: BoxDecoration(
+                color: AppColors.tertiary,
+                borderRadius: BorderRadius.circular(1),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              'INTERESTS',
+              style: GoogleFonts.inter(
+                fontSize: 11,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 2,
+                color: AppColors.tertiary,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        Wrap(
+          spacing: 8,
+          runSpacing: 10,
+          children: interests.map((interest) {
+            return Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              decoration: BoxDecoration(
+                color: AppColors.tertiary.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: AppColors.tertiary.withValues(alpha: 0.2), width: 1),
+                boxShadow: [
+                  BoxShadow(
+                    color: AppColors.tertiary.withValues(alpha: 0.05),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.tag, size: 12, color: AppColors.tertiary.withValues(alpha: 0.7)),
+                  const SizedBox(width: 4),
+                  Text(
+                    interest.toString(),
+                    style: GoogleFonts.inter(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white.withValues(alpha: 0.9),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }).toList(),
         ),
       ],
     );

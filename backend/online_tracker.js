@@ -12,6 +12,13 @@ module.exports = {
         hiddenLastSeen: privacy.hiddenLastSeen ?? false,
         hiddenLocation: privacy.hiddenLocation ?? false,
       });
+    } else {
+      // Sync privacy settings on reconnect
+      const user = onlineUsers.get(userId);
+      if (privacy.hiddenOnline !== undefined) user.hiddenOnline = privacy.hiddenOnline;
+      if (privacy.hiddenTyping !== undefined) user.hiddenTyping = privacy.hiddenTyping;
+      if (privacy.hiddenLastSeen !== undefined) user.hiddenLastSeen = privacy.hiddenLastSeen;
+      if (privacy.hiddenLocation !== undefined) user.hiddenLocation = privacy.hiddenLocation;
     }
     const user = onlineUsers.get(userId);
     user.socketIds.add(socketId);
@@ -91,5 +98,16 @@ module.exports = {
       const user = onlineUsers.get(userId);
       Object.assign(user, settings);
     }
+  },
+
+  getPrivacySettings(userId) {
+    const user = onlineUsers.get(userId);
+    if (!user) return null;
+    return {
+      hiddenOnline: user.hiddenOnline,
+      hiddenTyping: user.hiddenTyping,
+      hiddenLastSeen: user.hiddenLastSeen,
+      hiddenLocation: user.hiddenLocation
+    };
   }
 };

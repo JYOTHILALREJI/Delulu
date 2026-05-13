@@ -42,6 +42,9 @@ Map<String, dynamic> _parseSingleMessage(Map<String, dynamic> raw) {
     try {
       final gameData = content is Map ? content : jsonDecode(content.toString());
       msg['_parsed_game_data'] = gameData is Map ? gameData : {};
+      if (msg['_parsed_game_data']['sessionId'] != null) {
+        msg['_gameSessionId'] = msg['_parsed_game_data']['sessionId'].toString();
+      }
     } catch (_) {
       msg['_parsed_game_data'] = {};
     }
@@ -57,8 +60,9 @@ class _OptimizedChatBubble extends StatefulWidget {
   final bool isGrouped;
   final double screenWidth;
   final VoidCallback onReply;
+  final String currentUserId;
+  final String peerName;
   final Function(String reaction) onReactionSelected;
-
   final Function(Map<String, dynamic> msg) gameCardBuilder;
 
   const _OptimizedChatBubble({
@@ -70,6 +74,8 @@ class _OptimizedChatBubble extends StatefulWidget {
     required this.screenWidth,
     required this.onReply,
     required this.onReactionSelected,
+    required this.currentUserId,
+    required this.peerName,
     required this.gameCardBuilder,
   }) : super(key: key);
 
@@ -88,6 +94,19 @@ class _OptimizedChatBubbleState extends State<_OptimizedChatBubble> {
         final type = msg['message_type'] ?? 'text';
         final reactions = List<Map<String, dynamic>>.from(msg['reactions'] ?? []);
         final isReply = msg['reply_to_id'] != null;
+        
+        final snapshot = msg['snapshot'] ?? {};
+        final senderSnapshot = snapshot['sender'] ?? {};
+        final peerSnapshot = snapshot['peer'] ?? {};
+        
+        // Read receipt logic: only show pink ticks if the PEER (receiver) has them enabled
+        // WhatsApp Rule: My visibility depends on the peer's choice to share.
+        final peerAllowsReadReceipts = peerSnapshot['readReceiptsEnabled'] ?? true;
+        final isRead = msg['read_at'] != null;
+        final showPinkTick = isRead && peerAllowsReadReceipts;
+        
+        // E2EE logic: Banner is shown once per session, not in bubbles
+        // (Removing isE2EE field here to clean up bubbles)
 
         return GestureDetector(
           onHorizontalDragUpdate: (details) {
@@ -132,12 +151,19 @@ class _OptimizedChatBubbleState extends State<_OptimizedChatBubble> {
                   ),
                 // Bubble
                 Align(
-                  alignment: widget.isMe ? Alignment.centerRight : Alignment.centerLeft,
+                  alignment: type == 'game_status' 
+                    ? Alignment.center 
+                    : (widget.isMe ? Alignment.centerRight : Alignment.centerLeft),
                   child: Column(
-                    crossAxisAlignment: widget.isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                    crossAxisAlignment: type == 'game_status'
+                      ? CrossAxisAlignment.center
+                      : (widget.isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start),
                     children: [
                       if (type == 'game_status')
-                        widget.gameCardBuilder(msg)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          child: widget.gameCardBuilder(msg),
+                        )
                       else
                         Container(
                           margin: EdgeInsets.only(bottom: widget.isGrouped ? 2 : 10),
@@ -193,9 +219,9 @@ class _OptimizedChatBubbleState extends State<_OptimizedChatBubble> {
                                   if (widget.isMe && !widget.isFailed) ...[
                                     const SizedBox(width: 4),
                                     Icon(
-                                      msg['read_at'] != null ? Icons.done_all : Icons.done,
+                                      isRead ? Icons.done_all : Icons.done,
                                       size: 14,
-                                      color: msg['read_at'] != null ? Colors.blueAccent : Colors.white30,
+                                      color: showPinkTick ? const Color(0xFFFF4FA3) : Colors.white30,
                                     ),
                                   ],
                                   if (widget.isFailed) ...[
@@ -268,7 +294,7 @@ class _OptimizedChatBubbleState extends State<_OptimizedChatBubble> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            msg['reply_to_sender_id'].toString() == msg['sender_id'].toString() ? 'You' : 'Peer',
+            msg['reply_to_sender_id'].toString() == widget.currentUserId ? 'You' : widget.peerName,
             style: GoogleFonts.inter(color: AppColors.primary, fontWeight: FontWeight.bold, fontSize: 11),
           ),
           const SizedBox(height: 2),
@@ -311,7 +337,7 @@ class ChatScreen extends StatefulWidget {
   State<ChatScreen> createState() => _ChatScreenState();
 }
 
-class _ChatScreenState extends State<ChatScreen> {
+class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateMixin {
   final List<ValueNotifier<Map<String, dynamic>>> _messageNotifiers = [];
   final Map<int, ValueNotifier<Map<String, dynamic>>> _notifierMap = {};
   
@@ -329,6 +355,7 @@ class _ChatScreenState extends State<ChatScreen> {
   
   bool _isPremium = false;
   bool _isAttentionCooldownActive = false;
+  bool _isAttentionFreeUsed = false;
   String _cooldownRemaining = "";
   Timer? _cooldownTimer;
   ImageProvider? _peerImageProvider;
@@ -345,6 +372,8 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Duration _serverTimeOffset = Duration.zero;
   DateTime? _lastAttentionSeekerAt;
+  late AnimationController _attentionPulseController;
+  late Animation<double> _attentionPulseAnimation;
 
   @override
   void initState() {
@@ -354,6 +383,14 @@ class _ChatScreenState extends State<ChatScreen> {
     _audioRecorder = AudioRecorder();
     // Mark this peer's chat as active so global banner is suppressed
     SocketService().activeChatPeerId = widget.peerId;
+    
+    _attentionPulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 2),
+    )..repeat(reverse: true);
+    _attentionPulseAnimation = Tween<double>(begin: 1.0, end: 1.2).animate(
+      CurvedAnimation(parent: _attentionPulseController, curve: Curves.easeInOut),
+    );
 
     _loadCachedData().then((_) {
       _fetchCurrentUser().then((_) => _loadMessages());
@@ -365,8 +402,10 @@ class _ChatScreenState extends State<ChatScreen> {
 
     // Notify server we are viewing this conversation for realtime read receipts
     SocketService().emitConversationViewing(widget.channelId);
+    SocketService().emitMessageSync(widget.channelId);
 
     _msgController.addListener(_onTypingChanged);
+    _loadPersistedCooldown();
   }
 
   Future<void> _loadCachedData() async {
@@ -469,6 +508,20 @@ class _ChatScreenState extends State<ChatScreen> {
       final id = msg['id'];
       if (_notifierMap.containsKey(id)) return;
 
+      // Deduplicate by gameSessionId in real-time
+      final sessionId = msg['_gameSessionId'];
+      if (sessionId != null) {
+        final existingGameNotifier = _messageNotifiers.where((n) => n.value['_gameSessionId'] == sessionId).toList();
+        if (existingGameNotifier.isNotEmpty) {
+          // Update the existing card with the new status/data
+          existingGameNotifier.first.value = msg;
+          // Also update the notifierMap key if the DB ID changed
+          _notifierMap.remove(existingGameNotifier.first.value['id']);
+          _notifierMap[id] = existingGameNotifier.first;
+          return;
+        }
+      }
+
       final notifier = ValueNotifier(msg);
 
       if (mounted) {
@@ -485,23 +538,21 @@ class _ChatScreenState extends State<ChatScreen> {
       }
     });
 
-    SocketService().readReceiptStream.listen((data) {
+    SocketService().messageStatusStream.listen((data) {
       if (!mounted || data['channelId'] != widget.channelId) return;
+      
+      if (data['type'] == 'read_receipt') {
+        final readAt = data['readAt'] ?? DateTime.now().toIso8601String();
 
-      final readAt = data['readAt'] ?? DateTime.now().toIso8601String();
-
-      for (final notifier in _messageNotifiers) {
-        final msg = notifier.value;
-
-        final isMyMessage =
-            msg['sender_id'].toString() == _currentUserId.toString();
-
-        if (isMyMessage && msg['read_at'] == null) {
-          notifier.value = {
-            ...msg,
-            'read_at': readAt,
-          };
+        for (final notifier in _messageNotifiers) {
+          final msg = notifier.value;
+          final isMyMessage = msg['sender_id'].toString() == _currentUserId.toString();
+          if (isMyMessage && msg['read_at'] == null) {
+            notifier.value = { ...msg, 'read_at': readAt };
+          }
         }
+      } else if (data['type'] == 'unread_update') {
+        // Optional: Trigger a reload if needed, but usually unread_update is for the other user
       }
     });
 
@@ -514,7 +565,7 @@ class _ChatScreenState extends State<ChatScreen> {
     });
 
     SocketService().typingStream.listen((data) {
-      if (mounted && data['channelId'] == widget.channelId && data['userId'].toString() == widget.peerId) {
+      if (mounted && data['channelId'] == widget.channelId && data['from'].toString() == widget.peerId) {
         setState(() => _isPeerTyping = data['isTyping']);
       }
     });
@@ -529,6 +580,16 @@ class _ChatScreenState extends State<ChatScreen> {
       if (mounted) {
         _triggerVibration();
         _showCustomToast('${widget.peerName} is seeking your attention!', isError: true);
+      }
+    });
+
+    SocketService().attentionSentStream.listen((data) {
+      if (mounted) {
+        setState(() {
+          _lastAttentionSeekerAt = DateTime.parse(data['lastUsed']);
+          if (!_isPremium) _isAttentionFreeUsed = true;
+          _startCooldownTimer();
+        });
       }
     });
 
@@ -734,6 +795,7 @@ class _ChatScreenState extends State<ChatScreen> {
     if (isNotEmpty != _wasTyping) {
       _wasTyping = isNotEmpty;
       SocketService().emitTyping(widget.channelId, widget.peerId, isNotEmpty);
+      debugPrint('[Typing] Emitting ${isNotEmpty ? 'start' : 'stop'} to ${widget.peerId}');
     }
 
     // Auto-stop typing if no changes for 3 seconds (as fallback to server expiry)
@@ -750,6 +812,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   void dispose() {
+    _attentionPulseController.dispose();
     // Clear the active chat peer so global game invite banner resumes
     if (SocketService().activeChatPeerId == widget.peerId) {
       SocketService().activeChatPeerId = null;
@@ -785,7 +848,7 @@ class _ChatScreenState extends State<ChatScreen> {
               prefs.setString('current_user_id', _currentUserId!);
             });
             
-            _isPremium = body['user']['is_premium'] == true;
+            _isPremium = body['user']['is_premium_user'] == true;
             SharedPreferences.getInstance().then((prefs) {
               prefs.setBool('is_premium', _isPremium);
             });
@@ -798,7 +861,8 @@ class _ChatScreenState extends State<ChatScreen> {
               _serverTimeOffset = serverTime.difference(DateTime.now());
             }
 
-            final lastAt = body['user']['last_attention_seeker_at'];
+            _isAttentionFreeUsed = body['user']['attention_seeker_free_used'] == true;
+            final lastAt = body['user']['attention_seeker_last_used'];
             if (lastAt != null) {
               _lastAttentionSeekerAt = DateTime.parse(lastAt);
               _startCooldownTimer();
@@ -822,11 +886,31 @@ class _ChatScreenState extends State<ChatScreen> {
         final List<ValueNotifier<Map<String, dynamic>>> notifiers = [];
         _notifierMap.clear();
 
+        // Group by gameSessionId and only keep the latest for each session
+        final Map<String, int> lastGameIndex = {};
+        final List<Map<String, dynamic>> processed = [];
+
         for (var m in raw) {
           final parsed = _parseSingleMessage(m as Map<String, dynamic>);
-          final notifier = ValueNotifier(parsed);
+          final sessionId = parsed['_gameSessionId'];
+
+          if (sessionId != null) {
+            if (lastGameIndex.containsKey(sessionId)) {
+              // Replace older game message with newer one
+              processed[lastGameIndex[sessionId]!] = parsed;
+            } else {
+              lastGameIndex[sessionId] = processed.length;
+              processed.add(parsed);
+            }
+          } else {
+            processed.add(parsed);
+          }
+        }
+
+        for (var p in processed) {
+          final notifier = ValueNotifier(p);
           notifiers.add(notifier);
-          _notifierMap[parsed['id']] = notifier;
+          _notifierMap[p['id']] = notifier;
         }
 
         if (mounted) {
@@ -886,10 +970,14 @@ class _ChatScreenState extends State<ChatScreen> {
     final notifier = ValueNotifier(tempMsg);
     final replyToId = _replyingTo?['id'];
 
+    // --- Fix: Encrypt at send-time if enabled ---
+    String finalContent = text;
+    if (_e2eEnabled) {
+      finalContent = EncryptionHelper.encryptMessage(text);
+    }
+
     setState(() {
       _messageNotifiers.add(notifier);
-      // We don't put temp ID in notifierMap because we want the real ID 
-      // from the socket/API to be the authoritative key
       _replyingTo = null;
     });
     _scrollToBottom();
@@ -897,7 +985,7 @@ class _ChatScreenState extends State<ChatScreen> {
     try {
       final res = await ApiService.sendMessage(
         widget.channelId, 
-        text, 
+        finalContent, 
         replyToId: replyToId,
         clientTempId: tempId,
       );
@@ -999,6 +1087,13 @@ class _ChatScreenState extends State<ChatScreen> {
       });
 
       final notifier = ValueNotifier(tempMsg);
+
+      // --- Fix: Encrypt voice at send-time if enabled ---
+      String finalContent = base64Audio;
+      if (_e2eEnabled) {
+        finalContent = EncryptionHelper.encryptMessage(base64Audio);
+      }
+
       setState(() {
         _messageNotifiers.add(notifier);
       });
@@ -1006,7 +1101,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
       final res = await ApiService.sendMessage(
         widget.channelId, 
-        base64Audio, 
+        finalContent, 
         messageType: 'voice', 
         duration: duration,
         clientTempId: tempId,
@@ -1040,13 +1135,11 @@ class _ChatScreenState extends State<ChatScreen> {
       final remaining = cooldown - diff;
       String label;
       if (!_isPremium) {
-        label = 'Premium Locked';
-      } else if (remaining.inHours > 0) {
-        label = '${remaining.inHours}h ${remaining.inMinutes % 60}m';
-      } else if (remaining.inMinutes > 0) {
-        label = '${remaining.inMinutes}m ${remaining.inSeconds % 60}s';
+        label = 'Used';
       } else {
-        label = '${remaining.inSeconds}s';
+        final m = remaining.inMinutes;
+        final s = remaining.inSeconds % 60;
+        label = '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
       }
       
       if (label != _cooldownRemaining || !_isAttentionCooldownActive) {
@@ -1056,10 +1149,18 @@ class _ChatScreenState extends State<ChatScreen> {
         });
       }
     } else {
-      if (_isAttentionCooldownActive) {
+      // Cooldown expired for premium users
+      if (_isAttentionCooldownActive && _isPremium) {
         setState(() {
           _isAttentionCooldownActive = false;
           _cooldownRemaining = '';
+        });
+      }
+      // For non-premium, once used, it stays active (disabled)
+      if (!_isPremium && _isAttentionFreeUsed) {
+        setState(() {
+          _isAttentionCooldownActive = true;
+          _cooldownRemaining = 'Used';
         });
       }
     }
@@ -1170,6 +1271,66 @@ class _ChatScreenState extends State<ChatScreen> {
         ],
       ),
     );
+  }
+
+  Widget _buildBubbleWithDate(BuildContext context, int index) {
+    final notifier = _messageNotifiers[index];
+    final msg = notifier.value;
+    final isMe = msg['sender_id'].toString() == _currentUserId.toString();
+    final isFailed = msg['failed'] == true;
+    
+    bool isGrouped = false;
+    if (index > 0) {
+      final youngerMsg = _messageNotifiers[index - 1].value;
+      if (youngerMsg['sender_id'].toString() == msg['sender_id'].toString()) {
+        final currDate = msg['_parsed_date'] as DateTime?;
+        final youngerDate = youngerMsg['_parsed_date'] as DateTime?;
+        if (currDate != null && youngerDate != null) {
+          if (youngerDate.difference(currDate).inMinutes.abs() < 5) {
+            isGrouped = true;
+          }
+        }
+      }
+    }
+
+    bool showDateDivider = false;
+    if (index == 0) {
+      showDateDivider = true;
+    } else {
+      final olderMsg = _messageNotifiers[index - 1].value;
+      final olderDate = olderMsg['_parsed_date'] as DateTime?;
+      final currDate = msg['_parsed_date'] as DateTime?;
+      if (olderDate != null && currDate != null) {
+        if (olderDate.year != currDate.year || olderDate.month != currDate.month || olderDate.day != currDate.day) {
+          showDateDivider = true;
+        }
+      }
+    }
+
+    final content = _OptimizedChatBubble(
+      messageNotifier: notifier,
+      isMe: isMe,
+      isFailed: isFailed,
+      isGrouped: isGrouped,
+      screenWidth: MediaQuery.of(context).size.width,
+      onReply: () => setState(() => _replyingTo = msg),
+      onReactionSelected: (reaction) {
+        SocketService().emitReactionAdd(msg['id'], reaction, widget.peerId);
+      },
+      currentUserId: _currentUserId ?? '',
+      peerName: widget.peerName,
+      gameCardBuilder: _buildGameStatusCard,
+    );
+
+    if (showDateDivider) {
+      return Column(
+        children: [
+          _buildDateDivider(msg['created_at']),
+          content,
+        ],
+      );
+    }
+    return content;
   }
 
   @override
@@ -1383,14 +1544,9 @@ class _ChatScreenState extends State<ChatScreen> {
       ),
       body: Stack(
         children: [
+          // Background is now solid black as requested
           Positioned.fill(
-            child: Image.asset(
-              'assets/images/chat_bg.png',
-              fit: BoxFit.cover,
-            ),
-          ),
-          Positioned.fill(
-            child: Container(color: Colors.black.withOpacity(0.4)),
+            child: Container(color: Colors.black),
           ),
           GestureDetector(
             onTap: () => FocusScope.of(context).unfocus(),
@@ -1400,107 +1556,60 @@ class _ChatScreenState extends State<ChatScreen> {
                     child: _isLoading
                         ? const Center(child: CircularProgressIndicator(color: AppColors.primaryContainer))
                         : RepaintBoundary(
-                            child: ListView.builder(
-                            controller: _scrollController,
-                            reverse: false,
-                            physics: const BouncingScrollPhysics(
-                              parent: AlwaysScrollableScrollPhysics(),
-                            ),
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
-                            itemCount: _messageNotifiers.length + (_e2eEnabled ? 1 : 0),
-                            cacheExtent: 800,
-                            addAutomaticKeepAlives: false,
-                            addRepaintBoundaries: true,
-                            itemBuilder: (context, index) {
-                              if (_e2eEnabled && index == _messageNotifiers.length) {
-                                // Encryption Notice
-                                return Center(
-                                  child: Container(
-                                    margin: const EdgeInsets.symmetric(vertical: 24, horizontal: 32),
-                                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                                    decoration: BoxDecoration(
-                                      color: Colors.white.withOpacity(0.03),
-                                      borderRadius: BorderRadius.circular(16),
-                                      border: Border.all(color: Colors.white.withOpacity(0.05)),
-                                    ),
-                                    child: Column(
-                                      children: [
-                                        const Icon(Icons.lock_outline_rounded, color: Colors.white24, size: 20),
-                                        const SizedBox(height: 8),
-                                        Text(
-                                          'Messages are end-to-end encrypted. No one outside of this chat, not even Delulu, can read them.',
-                                          textAlign: TextAlign.center,
-                                          style: GoogleFonts.inter(
-                                            fontSize: 11,
-                                            color: Colors.white38,
-                                            height: 1.4,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
+                            child: StreamBuilder<Map<String, dynamic>>(
+                              stream: SocketService().messageStatusStream,
+                              builder: (context, _) {
+                                return ListView.builder(
+                                  controller: _scrollController,
+                                  reverse: false,
+                                  physics: const BouncingScrollPhysics(
+                                    parent: AlwaysScrollableScrollPhysics(),
                                   ),
-                                );
-                              }
-
-                              final notifier = _messageNotifiers[index];
-                              final msg = notifier.value;
-                              
-                              final isMe = msg['sender_id'].toString() == _currentUserId.toString();
-                              final isFailed = msg['failed'] == true;
-                              
-                              bool isGrouped = false;
-                              if (index > 0) {
-                                final youngerMsg = _messageNotifiers[index - 1].value;
-                                if (youngerMsg['sender_id'].toString() == msg['sender_id'].toString()) {
-                                  final currDate = msg['_parsed_date'] as DateTime?;
-                                  final youngerDate = youngerMsg['_parsed_date'] as DateTime?;
-                                  if (currDate != null && youngerDate != null) {
-                                    if (youngerDate.difference(currDate).inMinutes.abs() < 5) {
-                                      isGrouped = true;
+                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+                                  itemCount: _messageNotifiers.length + (_e2eEnabled ? 1 : 0),
+                                  cacheExtent: 800,
+                                  addAutomaticKeepAlives: false,
+                                  addRepaintBoundaries: true,
+                                  itemBuilder: (context, index) {
+                                    if (_e2eEnabled) {
+                                      if (index == 0) {
+                                        // Encryption Notice (Chip style) - Very top
+                                        return Center(
+                                          child: Container(
+                                            margin: const EdgeInsets.symmetric(vertical: 24, horizontal: 32),
+                                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                            decoration: BoxDecoration(
+                                              color: Colors.white.withOpacity(0.03),
+                                              borderRadius: BorderRadius.circular(20),
+                                              border: Border.all(color: Colors.white.withOpacity(0.05)),
+                                            ),
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                const Icon(Icons.lock_outline_rounded, color: Colors.white24, size: 14),
+                                                const SizedBox(width: 8),
+                                                Text(
+                                                  'Messages are end-to-end encrypted',
+                                                  style: GoogleFonts.inter(
+                                                    fontSize: 11,
+                                                    fontWeight: FontWeight.w500,
+                                                    color: Colors.white38,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        );
+                                      }
+                                      return _buildBubbleWithDate(context, index - 1);
                                     }
-                                  }
-                                }
-                              }
-
-                              bool showDateDivider = false;
-                              if (index == _messageNotifiers.length - 1) {
-                                showDateDivider = true;
-                              } else {
-                                final olderMsg = _messageNotifiers[index + 1].value;
-                                final olderDate = olderMsg['_parsed_date'] as DateTime?;
-                                final currDate = msg['_parsed_date'] as DateTime?;
-                                if (olderDate != null && currDate != null) {
-                                  if (olderDate.year != currDate.year || olderDate.month != currDate.month || olderDate.day != currDate.day) {
-                                    showDateDivider = true;
-                                  }
-                                }
-                              }
-
-                              final content = _OptimizedChatBubble(
-                                messageNotifier: notifier,
-                                isMe: isMe,
-                                isFailed: isFailed,
-                                isGrouped: isGrouped,
-                                screenWidth: MediaQuery.of(context).size.width,
-                                onReply: () => setState(() => _replyingTo = msg),
-                                onReactionSelected: (reaction) {
-                                  SocketService().emitReactionAdd(msg['id'], reaction, widget.peerId);
-                                },
-                                gameCardBuilder: _buildGameStatusCard,
-                              );
-
-                              if (showDateDivider) {
-                                return Column(
-                                  children: [
-                                    _buildDateDivider(msg['created_at']),
-                                    content,
-                                  ],
+                                    
+                                    return _buildBubbleWithDate(context, index);
+                                  },
                                 );
                               }
-                              return content;
-                            },
+                            ),
                           ),
-                        ),
                   ),
                   if (_replyingTo != null) _buildReplyPreview(),
                   _buildAttentionSeekerButton(),
@@ -1524,11 +1633,18 @@ class _ChatScreenState extends State<ChatScreen> {
                                 ),
                                 child: Row(
                                   children: [
-                                    Icon(
-                                      _isRecordingLocked ? Icons.lock : Icons.mic,
-                                      color: Colors.redAccent,
-                                      size: 20,
-                                    ),
+                                    if (_isRecording)
+                                      const Icon(Icons.mic, color: Colors.redAccent, size: 20)
+                                          .animate(onPlay: (controller) => controller.repeat())
+                                          .scale(begin: const Offset(1, 1), end: const Offset(1.2, 1.2), duration: 600.ms, curve: Curves.easeInOut)
+                                          .then()
+                                          .scale(begin: const Offset(1.2, 1.2), end: const Offset(1, 1), duration: 600.ms, curve: Curves.easeInOut)
+                                    else
+                                      Icon(
+                                        _isRecordingLocked ? Icons.lock : Icons.mic,
+                                        color: Colors.redAccent,
+                                        size: 20,
+                                      ),
                                     const SizedBox(width: 12),
                                     Text(
                                       '${(_recordingDuration ~/ 60).toString().padLeft(2, '0')}:${(_recordingDuration % 60).toString().padLeft(2, '0')}',
@@ -1566,7 +1682,7 @@ class _ChatScreenState extends State<ChatScreen> {
                                   controller: _msgController,
                                   style: const TextStyle(color: Colors.white),
                                   decoration: InputDecoration(
-                                    hintText: 'Type a message...',
+                                    hintText: 'Whisper something Delulu...',
                                     hintStyle: TextStyle(color: Colors.white.withOpacity(0.3)),
                                     border: InputBorder.none,
                                     contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -1760,7 +1876,7 @@ class _ChatScreenState extends State<ChatScreen> {
       width: double.infinity,
       constraints: const BoxConstraints(maxWidth: 300),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           InkWell(
             onTap: (status == 'accepted' || status == 'completed') 
@@ -1915,10 +2031,12 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Widget _buildAttentionSeekerButton() {
+    final bool isDisabled = (!_isPremium && _isAttentionFreeUsed) || (_isPremium && _isAttentionCooldownActive);
+    
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Tooltip(
-        message: _isAttentionCooldownActive && !_isPremium ? 'Upgrade to Rizz+ to use Attention Seeker' : '',
+        message: isDisabled && !_isPremium ? 'Upgrade to Rizz+ for unlimited Attention Seeker' : '',
         preferBelow: false,
         triggerMode: TooltipTriggerMode.tap,
         decoration: BoxDecoration(
@@ -1927,50 +2045,51 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
         textStyle: GoogleFonts.inter(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600),
         child: GestureDetector(
-          onLongPress: _handleAttentionSeeker,
-          onTap: () {
-            if (_isAttentionCooldownActive && !_isPremium) {
-              // Tooltip handles the message
-            } else if (_isAttentionCooldownActive) {
-               _showCustomToast('Cooldown active: $_cooldownRemaining', isError: true);
-            } else {
-               _handleAttentionSeeker();
-            }
-          },
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 300),
-            width: 54,
-            height: 54,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: LinearGradient(
-                colors: _isAttentionCooldownActive
-                    ? [const Color(0xFF374151), const Color(0xFF1F2937)]
-                    : [AppColors.primary, AppColors.tertiary],
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: (_isAttentionCooldownActive ? Colors.black26 : AppColors.primary.withOpacity(0.4)),
-                  blurRadius: 12,
-                  spreadRadius: 1,
+          onTap: isDisabled ? null : _handleAttentionSeeker,
+          child: ScaleTransition(
+            scale: isDisabled ? const AlwaysStoppedAnimation(1.0) : _attentionPulseAnimation,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 300),
+              width: isDisabled ? 110 : 54, 
+              height: 54,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(27),
+                gradient: LinearGradient(
+                  colors: isDisabled
+                      ? [const Color(0xFF1F2937), const Color(0xFF111827)]
+                      : [AppColors.primary, AppColors.tertiary],
                 ),
-              ],
-            ),
-            child: Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    _isAttentionCooldownActive ? Icons.timer_outlined : Icons.vibration,
-                    color: _isAttentionCooldownActive ? Colors.white38 : Colors.white,
-                    size: _isAttentionCooldownActive ? 18 : 26,
+                boxShadow: [
+                  BoxShadow(
+                    color: (isDisabled ? Colors.black45 : AppColors.primary.withOpacity(0.6)),
+                    blurRadius: isDisabled ? 4 : 20,
+                    spreadRadius: isDisabled ? 1 : 2,
                   ),
-                  if (_isAttentionCooldownActive)
-                    Text(
-                      _cooldownRemaining.split(' ').first,
-                      style: GoogleFonts.inter(fontSize: 9, color: Colors.white60, fontWeight: FontWeight.bold),
-                    ),
                 ],
+              ),
+              child: Center(
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      isDisabled && _isPremium ? Icons.timer_outlined : Icons.vibration,
+                      color: isDisabled ? Colors.white24 : Colors.white,
+                      size: 24,
+                    ),
+                    if (isDisabled) ...[
+                      const SizedBox(width: 8),
+                      Text(
+                        _cooldownRemaining,
+                        style: GoogleFonts.inter(
+                          fontSize: 13, 
+                          color: Colors.white60, 
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.5
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
               ),
             ),
           ),
@@ -1987,14 +2106,28 @@ class _ChatScreenState extends State<ChatScreen> {
 
   void _startCooldownTimer() {
     _cooldownTimer?.cancel();
+    
     _cooldownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (!mounted) {
         timer.cancel();
         return;
       }
-      _fetchCurrentUser(); // Keep it simple: refresh user state to get cooldown
-      timer.cancel(); // Stop after one refresh, we can rely on periodic refresh or socket
+      _checkCooldown();
     });
+  }
+
+  void _loadPersistedCooldown() async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getString('last_attention_${widget.peerId}');
+    if (saved != null) {
+      final dt = DateTime.parse(saved);
+      if (mounted) {
+        setState(() {
+          _lastAttentionSeekerAt = dt;
+          _startCooldownTimer();
+        });
+      }
+    }
   }
 
   void _scrollToMessage(int id) {

@@ -15,10 +15,9 @@ class SocketService {
 
   // Streams
   final _messageController = StreamController<Map<String, dynamic>>.broadcast();
-  final _unreadController = StreamController<Map<String, dynamic>>.broadcast();
-  final _readReceiptController = StreamController<Map<String, dynamic>>.broadcast();
   final _typingController = StreamController<Map<String, dynamic>>.broadcast();
   final _statusController = StreamController<Map<String, dynamic>>.broadcast();
+  final _messageStatusController = StreamController<Map<String, dynamic>>.broadcast();
   final _attentionController = StreamController<Map<String, dynamic>>.broadcast();
   final _gameInviteController = StreamController<Map<String, dynamic>>.broadcast();
   final _gameInviteSentController = StreamController<Map<String, dynamic>>.broadcast();
@@ -32,14 +31,15 @@ class SocketService {
   final _errorController = StreamController<Map<String, dynamic>>.broadcast();
   final _gameMessageController = StreamController<Map<String, dynamic>>.broadcast();
   final _reactionController = StreamController<Map<String, dynamic>>.broadcast();
+  final _attentionSentController = StreamController<Map<String, dynamic>>.broadcast();
 
   // Getters
   Stream<Map<String, dynamic>> get messageStream => _messageController.stream;
-  Stream<Map<String, dynamic>> get unreadStream => _unreadController.stream;
-  Stream<Map<String, dynamic>> get readReceiptStream => _readReceiptController.stream;
   Stream<Map<String, dynamic>> get typingStream => _typingController.stream;
   Stream<Map<String, dynamic>> get statusStream => _statusController.stream;
+  Stream<Map<String, dynamic>> get messageStatusStream => _messageStatusController.stream;
   Stream<Map<String, dynamic>> get attentionStream => _attentionController.stream;
+  Stream<Map<String, dynamic>> get attentionSentStream => _attentionSentController.stream;
   Stream<Map<String, dynamic>> get gameInviteStream => _gameInviteController.stream;
   Stream<Map<String, dynamic>> get gameInviteSentStream => _gameInviteSentController.stream;
   Stream<Map<String, dynamic>> get gameInviteResponseStream => _gameInviteResponseController.stream;
@@ -88,8 +88,16 @@ class SocketService {
     _socket?.emit('conversation:viewing', {'channelId': channelId});
   }
 
+  void emitMessageSync(int channelId) {
+    _socket?.emit('request:message:sync', {'channelId': channelId});
+  }
+
   void emitAttentionSeeker(String peerId) {
     _socket?.emit('attention_seeker', {'peerId': peerId});
+  }
+
+  void emitPresenceUpdate(Map<String, dynamic> settings) {
+    _socket?.emit('presence:update', settings);
   }
 
   void emitReactionAdd(int messageId, String reaction, String peerId) {
@@ -208,11 +216,11 @@ class SocketService {
 
     // Event listeners
     _socket!.on('new_message', (data) => _messageController.add(data));
-    _socket!.on('unread_update', (data) => _unreadController.add(data));
-    _socket!.on('message_read', (data) => _readReceiptController.add(data));
-    _socket!.on('typing_status', (data) => _typingController.add(data));
-    _socket!.on('user_status', (data) => _statusController.add(data));
+    _socket!.on('message:status', (data) => _messageStatusController.add(data));
+    _socket!.on('typing:update', (data) => _typingController.add(data));
+    _socket!.on('presence:update', (data) => _statusController.add(data));
     _socket!.on('attention_seeker_received', (data) => _attentionController.add(data));
+    _socket!.on('attention_seeker_sent', (data) => _attentionSentController.add(data));
     _socket!.on('game_invite_received', (data) => _gameInviteController.add(data));
     _socket!.on('game_invite_sent', (data) => _gameInviteSentController.add(data));
     _socket!.on('game_invite_response_received', (data) => _gameInviteResponseController.add(data));
@@ -242,15 +250,31 @@ class SocketService {
   }
 
   void disconnect() {
-    _socket?.disconnect();
-    _socket = null;
+    if (_socket != null) {
+      _socket!.emit('presence:offline');
+      _socket!.disconnect();
+      _socket = null;
+    }
+  }
+
+  Future<void> logout() async {
+    disconnect();
+    
+    // Clear all streams to prevent memory leaks or stale data
+    _messageController.add({});
+    _statusController.add({'status': 'offline'});
+    _typingController.add({'isTyping': false});
+    
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('auth_token');
+    await prefs.remove('current_user_id');
+    // ... any other keys
   }
 
   void dispose() {
     _typingDebounce?.cancel();
     _messageController.close();
-    _unreadController.close();
-    _readReceiptController.close();
+    _messageStatusController.close();
     _typingController.close();
     _statusController.close();
     _attentionController.close();

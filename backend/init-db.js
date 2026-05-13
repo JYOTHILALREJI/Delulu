@@ -100,7 +100,8 @@ async function initDb() {
         message_type VARCHAR(20) DEFAULT 'text',
         duration INTEGER,
         created_at TIMESTAMPTZ DEFAULT NOW(),
-        read_at TIMESTAMPTZ
+        read_at TIMESTAMPTZ,
+        snapshot JSONB DEFAULT '{}'::jsonb
       );
     `);
     console.log('  ✓ messages');
@@ -109,6 +110,7 @@ async function initDb() {
       await client.query(`
         ALTER TABLE messages ADD COLUMN IF NOT EXISTS message_type VARCHAR(20) DEFAULT 'text';
         ALTER TABLE messages ADD COLUMN IF NOT EXISTS duration INTEGER;
+        ALTER TABLE messages ADD COLUMN IF NOT EXISTS snapshot JSONB DEFAULT '{}'::jsonb;
       `);
     } catch (e) { }
 
@@ -500,8 +502,10 @@ async function initDb() {
       await client.query(`
         ALTER TABLE profiles ADD COLUMN IF NOT EXISTS streak_count INTEGER DEFAULT 0;
         ALTER TABLE profiles ADD COLUMN IF NOT EXISTS popularity_score DOUBLE PRECISION DEFAULT 0;
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS attention_seeker_last_used TIMESTAMPTZ;
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS attention_seeker_free_used BOOLEAN DEFAULT FALSE;
       `);
-      console.log('  ✓ added boosting columns to profiles');
+      console.log('  ✓ added boosting and attention seeker columns');
     } catch (e) { }
 
     console.log('\nDatabase initialized successfully.');

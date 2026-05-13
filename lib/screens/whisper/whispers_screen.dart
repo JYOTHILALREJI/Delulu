@@ -8,6 +8,7 @@ import '../../../services/api_service.dart';
 import 'chat_screen.dart';
 import '../../../services/socket_service.dart';
 import '../../components/delulu_wavy_loader.dart';
+import '../../utils/encryption_helper.dart';
 
 class WhispersScreen extends StatefulWidget {
   const WhispersScreen({super.key});
@@ -35,8 +36,7 @@ class WhispersScreenState extends State<WhispersScreen> {
   void _initSocket() {
     // Refresh list when a new message arrives or unread status changes
     SocketService().messageStream.listen((_) => fetchConnections());
-    SocketService().unreadStream.listen((_) => fetchConnections());
-    SocketService().readReceiptStream.listen((_) => fetchConnections());
+    SocketService().messageStatusStream.listen((_) => fetchConnections());
     
     // Listen for online status updates
     _statusSub = SocketService().statusStream.listen((data) {
@@ -160,8 +160,17 @@ class WhispersScreenState extends State<WhispersScreen> {
                                 ? photos.firstWhere((p) => p['is_primary'] == true, orElse: () => photos[0])
                                 : null;
                             final avatarUrl = primaryPhoto?['url'];
-                            final lastMsg = conn['last_message'] as String?;
+                            String? lastMsg = conn['last_message'] as String?;
                             final lastTime = conn['last_message_time'] as String?;
+
+                            // Decrypt last message if encrypted
+                            if (lastMsg != null && EncryptionHelper.isEncrypted(lastMsg)) {
+                              try {
+                                lastMsg = EncryptionHelper.decryptMessage(lastMsg);
+                              } catch (_) {
+                                lastMsg = '[Encrypted Message]';
+                              }
+                            }
 
                             return Container(
                               margin: const EdgeInsets.only(bottom: 12),

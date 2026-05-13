@@ -8,6 +8,7 @@ import '../../../theme/app_colors.dart';
 import '../../../services/api_service.dart';
 import '../uploadedImages/vision_board.dart';
 import '../../services/verification_service.dart';
+import '../../services/socket_service.dart';
 import 'edit_profile_screen.dart';
 import 'blocked_profiles_screen.dart';
 import '../premium/subscription_screen.dart';
@@ -87,6 +88,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     try {
       await ApiService.saveProfile({key: value});
+      if (key == 'online_status_enabled' || key == 'typing_indicator_enabled') {
+        SocketService().emitPresenceUpdate({key: value});
+      }
     } catch (_) {
       // Revert on failure
       setState(() {

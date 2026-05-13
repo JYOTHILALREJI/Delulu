@@ -175,6 +175,7 @@ router.get('/messages/:channelId', authMiddleware, async (req, res) => {
                     rm.content as reply_to_content,
                     rm.sender_id as reply_to_sender_id,
                     rm.message_type as reply_to_message_type,
+                    m.snapshot,
                     p_peer.read_receipt_enabled as peer_read_receipt_enabled,
                     COALESCE(
                       (SELECT json_agg(json_build_object('userId', user_id, 'reaction', reaction))
@@ -208,6 +209,7 @@ router.get('/messages/:channelId', authMiddleware, async (req, res) => {
                     reply_to_content: m.reply_to_content,
                     reply_to_sender_id: m.reply_to_sender_id,
                     reply_to_message_type: m.reply_to_message_type,
+                    snapshot: typeof m.snapshot === 'string' ? JSON.parse(m.snapshot) : (m.snapshot || {}),
                     reactions: typeof m.reactions === 'string' ? JSON.parse(m.reactions) : m.reactions
                 };
             })
@@ -270,11 +272,37 @@ router.post('/send', authMiddleware, async (req, res) => {
             readAt = new Date();
         }
 
+        // --- WhatsApp Fix: Capture settings snapshot at send-time ---
+        const settingsRes = await db.query(
+            `SELECT user_id, read_receipt_enabled, last_seen_enabled, typing_indicator_enabled, e2e_encryption_enabled 
+             FROM profiles 
+             WHERE user_id IN ($1, $2)`,
+            [senderId, peerId]
+        );
+
+        const senderProfile = settingsRes.rows.find(r => r.user_id === senderId) || {};
+        const peerProfile = settingsRes.rows.find(r => r.user_id === peerId) || {};
+
+        const snapshot = {
+            sender: {
+                readReceiptsEnabled: senderProfile.read_receipt_enabled !== false,
+                lastSeenEnabled: senderProfile.last_seen_enabled !== false,
+                typingEnabled: senderProfile.typing_indicator_enabled !== false,
+                e2eeEnabled: senderProfile.e2e_encryption_enabled === true
+            },
+            peer: {
+                readReceiptsEnabled: peerProfile.read_receipt_enabled !== false,
+                lastSeenEnabled: peerProfile.last_seen_enabled !== false,
+                typingEnabled: peerProfile.typing_indicator_enabled !== false,
+                e2eeEnabled: peerProfile.e2e_encryption_enabled === true
+            }
+        };
+
         const result = await db.query(
-            `INSERT INTO messages (channel_id, sender_id, content, message_type, duration, reply_to_id, read_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)
+            `INSERT INTO messages (channel_id, sender_id, content, message_type, duration, reply_to_id, read_at, snapshot)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
              RETURNING id, created_at, read_at`,
-            [channelId, senderId, content.trim(), message_type || 'text', duration || null, reply_to_id || null, readAt]
+            [channelId, senderId, content.trim(), message_type || 'text', duration || null, reply_to_id || null, readAt, JSON.stringify(snapshot)]
         );
 
         // Fetch reply context for broadcast if it exists
@@ -305,7 +333,8 @@ router.post('/send', authMiddleware, async (req, res) => {
             reply_to_content: replyContext?.content,
             reply_to_sender_id: replyContext?.sender_id,
             reply_to_message_type: replyContext?.message_type,
-            client_temp_id: clientTempId || null
+            client_temp_id: clientTempId || null,
+            snapshot: snapshot
         };
 
         // Emit to peer

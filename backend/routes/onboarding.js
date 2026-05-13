@@ -132,10 +132,20 @@ router.put('/profile', authMiddleware, async (req, res) => {
     // Emit status change if visibility toggled
     const io = socketManager.getIo();
     if (online_status_enabled === false) {
-      io.emit('user_status', { userId, status: 'offline' });
+      io.emit('presence:update', { userId, status: 'offline' });
     } else if (online_status_enabled === true) {
-      io.emit('user_status', { userId, status: 'online' });
+      io.emit('presence:update', { userId, status: 'online' });
     }
+
+    // Update onlineTracker with new privacy settings (partial update)
+    const onlineTracker = require('../online_tracker');
+    const update = {};
+    if (online_status_enabled !== undefined) update.hiddenOnline = online_status_enabled === false;
+    if (typing_indicator_enabled !== undefined) update.hiddenTyping = typing_indicator_enabled === false;
+    if (last_seen_enabled !== undefined) update.hiddenLastSeen = last_seen_enabled === false;
+    if (hide_location_enabled !== undefined) update.hiddenLocation = hide_location_enabled === true;
+    
+    onlineTracker.setPrivacySettings(userId, update);
 
     // Mark user as onboarded (at the final submission)
     await db.query(

@@ -131,9 +131,10 @@ io.on('connection', async (socket) => {
 
   // Track online status with heartbeats
   if (onlineTracker.addSocket(userId, socket.id, privacySettings)) {
-    if (!privacySettings.hiddenOnline) {
-      // Broadcast to everyone that I'm online, but recipients will check privacy too
-      io.emit('user_status', { userId, status: 'online' });
+    // ONLY emit if the user allows their online status to be seen
+    // Check both initial privacy settings AND double check if it's currently enabled
+    if (privacySettings.hiddenOnline === false) {
+      io.emit('presence:update', { userId, status: 'online' });
     }
   }
 
@@ -150,12 +151,16 @@ io.on('connection', async (socket) => {
         'UPDATE messages SET read_at = NOW() WHERE channel_id = $1 AND sender_id != $2 AND read_at IS NULL',
         [data.channelId, userId]
       ).then(() => {
-        io.to(userId.toString()).emit('unread_update', { channelId: data.channelId });
+        io.to(userId.toString()).emit('message:status', { channelId: data.channelId, type: 'unread_update' });
         // Find peerId to notify them
         db.query('SELECT user1_id, user2_id FROM channels WHERE id = $1', [data.channelId]).then(cRes => {
           if (cRes.rows.length > 0) {
             const peerId = cRes.rows[0].user1_id === userId ? cRes.rows[0].user2_id : cRes.rows[0].user1_id;
-            io.to(peerId.toString()).emit('message_read', { channelId: data.channelId, readerId: userId });
+            io.to(peerId.toString()).emit('message:status', { 
+              channelId: data.channelId, 
+              readerId: userId, 
+              type: 'read_receipt' 
+            });
           }
         });
       });
@@ -166,11 +171,11 @@ io.on('connection', async (socket) => {
 
   socket.on('typing:start', (data) => {
     // data: { channelId, peerId }
-    if (privacySettings.hiddenTyping) return;
+    if (!onlineTracker.canSeeTyping(userId, data.peerId)) return;
     onlineTracker.updateTyping(userId, data.peerId);
-    io.to(data.peerId.toString()).emit('typing_status', {
+    io.to(data.peerId.toString()).emit('typing:update', {
       channelId: data.channelId,
-      userId: userId,
+      from: userId,
       isTyping: true
     });
   });
@@ -178,9 +183,9 @@ io.on('connection', async (socket) => {
   socket.on('typing:stop', (data) => {
     // data: { channelId, peerId }
     onlineTracker.updateTyping(userId, null);
-    io.to(data.peerId.toString()).emit('typing_status', {
+    io.to(data.peerId.toString()).emit('typing:update', {
       channelId: data.channelId,
-      userId: userId,
+      from: userId,
       isTyping: false
     });
   });
@@ -245,8 +250,53 @@ io.on('connection', async (socket) => {
 
       // Relay to peer
       io.to(peerId.toString()).emit('attention_seeker_received', { fromId: userId });
+
+      // Notify sender to update cooldown UI
+      socket.emit('attention_seeker_sent', { 
+        lastUsed: new Date().toISOString(),
+        isPremium: isPremium
+      });
     } catch (err) {
       console.error('Attention seeker error:', err);
+    }
+  });
+
+  socket.on('request:message:sync', ({ channelId }) => {
+    // This is a hint to the server to re-broadcast state if needed
+    // In our system, conversation:viewing handles the main sync.
+    io.to(userId.toString()).emit('message:status', { channelId, type: 'sync_ack' });
+  });
+
+  socket.on('presence:offline', () => {
+    if (onlineTracker.removeSocket(userId, socket.id)) {
+      io.emit('presence:update', { userId, status: 'offline' });
+    }
+  });
+
+  socket.on('presence:update', (data) => {
+    if (!userId) return;
+    const onlineStatusEnabled = data.online_status_enabled;
+    const typingIndicatorEnabled = data.typing_indicator_enabled;
+    
+    const update = {};
+    if (onlineStatusEnabled !== undefined) update.hiddenOnline = onlineStatusEnabled === false;
+    if (typingIndicatorEnabled !== undefined) update.hiddenTyping = typingIndicatorEnabled === false;
+    
+    onlineTracker.setPrivacySettings(userId, update);
+    const current = onlineTracker.getPrivacySettings(userId);
+    if (!current) return;
+
+    // ONLY broadcast if the Online Status setting itself was toggled
+    if (onlineStatusEnabled !== undefined) {
+      if (onlineStatusEnabled === false) {
+        // Just turned off: tell everyone we are offline
+        io.emit('presence:update', { userId, status: 'offline' });
+      } else {
+        // Just turned on: tell everyone we are online (if we are)
+        if (onlineTracker.isOnline(userId)) {
+          io.emit('presence:update', { userId, status: 'online' });
+        }
+      }
     }
   });
 
@@ -755,7 +805,7 @@ io.on('connection', async (socket) => {
   socket.on('disconnect', async () => {
     console.log(`User disconnected from socket: ${userId}`);
     if (onlineTracker.removeSocket(userId, socket.id)) {
-      io.emit('user_status', { userId, status: 'offline' });
+      io.emit('presence:update', { userId, status: 'offline' });
       // Update last seen
       try {
         await db.query('UPDATE profiles SET last_seen_at = NOW() WHERE user_id = $1', [userId]);

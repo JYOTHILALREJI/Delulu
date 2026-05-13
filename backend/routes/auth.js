@@ -103,10 +103,11 @@ router.post('/login', async (req, res) => {
 router.get('/me', authMiddleware, async (req, res) => {
   try {
     const result = await db.query(
-      `SELECT u.id, u.email, u.display_name, u.is_onboarded, u.onboarding_step, u.created_at, u.is_verified, u.is_premium_user,
+      `SELECT u.id, u.email, u.display_name, u.is_onboarded, u.onboarding_step, u.is_premium_user,
+              u.attention_seeker_last_used, u.attention_seeker_free_used,
               p.display_name AS profile_name, p.age, p.gender, p.interested_in, p.bio, p.interests, p.photos,
               p.online_status_enabled, p.typing_indicator_enabled, p.last_seen_enabled, p.read_receipt_enabled,
-              p.latitude, p.longitude, p.live_location_enabled, p.location_name,
+              p.latitude, p.longitude, p.live_location_enabled, p.location_name, u.is_verified,
               p.is_premium, p.last_attention_seeker_at, p.e2e_encryption_enabled, p.hide_location_enabled,
               s.plan_id AS subscription_plan, s.expiry_date AS subscription_expiry
        FROM users u
@@ -186,7 +187,8 @@ router.get('/me', authMiddleware, async (req, res) => {
         location_name: row.location_name,
         is_premium: row.is_premium,
         is_premium_user: row.is_premium_user,
-        last_attention_seeker_at: row.last_attention_seeker_at,
+        attention_seeker_last_used: row.attention_seeker_last_used,
+        attention_seeker_free_used: row.attention_seeker_free_used,
         e2e_encryption_enabled: row.e2e_encryption_enabled,
         hide_location_enabled: row.hide_location_enabled,
         subscription_plan: row.subscription_plan,
