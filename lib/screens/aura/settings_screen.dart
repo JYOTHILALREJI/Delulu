@@ -459,6 +459,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ]),
 
                   const SizedBox(height: 28),
+                  
+                  // ── Legal ──
+                  _buildSectionLabel('LEGAL'),
+                  _buildSettingsGroup([
+                    _buildNavTile(
+                      icon: Icons.privacy_tip_outlined,
+                      label: 'Privacy Policy',
+                      onTap: () => Navigator.pushNamed(context, '/privacy-policy'),
+                    ),
+                    _buildNavTile(
+                      icon: Icons.description_outlined,
+                      label: 'Terms & Conditions',
+                      onTap: () => Navigator.pushNamed(context, '/terms-and-conditions'),
+                    ),
+                  ]),
+
+                  const SizedBox(height: 28),
 
                   // ── Account ──
                   _buildSectionLabel('ACCOUNT'),

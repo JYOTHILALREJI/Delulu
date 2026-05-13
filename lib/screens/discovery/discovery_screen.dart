@@ -886,14 +886,16 @@ class DiscoveryScreenState extends State<DiscoveryScreen> with SingleTickerProvi
                                 ),
                               ),
                               const SizedBox(width: 8),
-                              if (profile['is_premium'] == true)
+                              if (profile['is_premium_user'] == true)
                                 Container(
                                   padding: const EdgeInsets.all(4),
                                   decoration: const BoxDecoration(
-                                    color: Color(0xFFFFD700),
+                                    gradient: LinearGradient(
+                                      colors: [Color(0xFFFFD700), Color(0xFFFFA500)],
+                                    ),
                                     shape: BoxShape.circle,
                                   ),
-                                  child: const Icon(Icons.bolt, size: 12, color: Colors.black),
+                                  child: const Icon(Icons.workspace_premium, size: 14, color: Colors.black),
                                 ),
                             ],
                           ),

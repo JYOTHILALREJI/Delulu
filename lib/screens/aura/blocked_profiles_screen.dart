@@ -118,9 +118,26 @@ class _BlockedProfilesScreenState extends State<BlockedProfilesScreen> {
                                 ? const Icon(Icons.person, color: AppColors.outlineVariant)
                                 : null,
                           ),
-                          title: Text(
-                            user['display_name'] ?? 'Unknown',
-                            style: GoogleFonts.inter(fontWeight: FontWeight.w600, color: Colors.white),
+                          title: Row(
+                            children: [
+                              Text(
+                                user['display_name'] ?? 'Unknown',
+                                style: GoogleFonts.inter(fontWeight: FontWeight.w600, color: Colors.white),
+                              ),
+                              if (user['is_premium_user'] == true) ...[
+                                const SizedBox(width: 6),
+                                Container(
+                                  padding: const EdgeInsets.all(3),
+                                  decoration: const BoxDecoration(
+                                    gradient: LinearGradient(
+                                      colors: [Color(0xFFFFD700), Color(0xFFFFA500)],
+                                    ),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: const Icon(Icons.workspace_premium, size: 10, color: Colors.black),
+                                ),
+                              ],
+                            ],
                           ),
                           subtitle: Text(
                             'Tap to view profile',

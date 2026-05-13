@@ -112,6 +112,7 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _isPeerOnline = false;
   bool _isPeerTyping = false;
   bool _isBlocked = false;
+  bool _isPeerPremium = false;
   bool _e2eEnabled = false;
   bool _typingIndicatorEnabled = true;
   Timer? _typingTimer;
@@ -215,6 +216,7 @@ class _ChatScreenState extends State<ChatScreen> {
         if (mounted) {
           setState(() {
             _isBlocked = body['profile']?['is_blocked'] == true;
+            _isPeerPremium = body['profile']?['is_premium_user'] == true;
           });
         }
       }
@@ -1026,6 +1028,19 @@ class _ChatScreenState extends State<ChatScreen> {
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
+                        if (_isPeerPremium) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.all(3),
+                            decoration: const BoxDecoration(
+                              gradient: LinearGradient(
+                                colors: [Color(0xFFFFD700), Color(0xFFFFA500)],
+                              ),
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(Icons.workspace_premium, size: 10, color: Colors.black),
+                          ),
+                        ],
                         if (_isBlocked) ...[
                           const SizedBox(width: 8),
                           Container(

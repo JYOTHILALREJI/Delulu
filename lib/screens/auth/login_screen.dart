@@ -325,6 +325,42 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                         ],
                       ),
+                      const SizedBox(height: 24),
+                      Center(
+                        child: Wrap(
+                          alignment: WrapAlignment.center,
+                          children: [
+                            Text('By signing in, you agree to our ',
+                                style: GoogleFonts.beVietnamPro(
+                                  fontSize: 12,
+                                  color: AppColors.onSurfaceVariant.withValues(alpha: 0.6),
+                                )),
+                            GestureDetector(
+                              onTap: () => Navigator.pushNamed(context, '/terms-and-conditions'),
+                              child: Text('Terms',
+                                  style: GoogleFonts.beVietnamPro(
+                                    fontSize: 12,
+                                    color: AppColors.primary.withValues(alpha: 0.8),
+                                    fontWeight: FontWeight.w600,
+                                  )),
+                            ),
+                            Text(' & ',
+                                style: GoogleFonts.beVietnamPro(
+                                  fontSize: 12,
+                                  color: AppColors.onSurfaceVariant.withValues(alpha: 0.6),
+                                )),
+                            GestureDetector(
+                              onTap: () => Navigator.pushNamed(context, '/privacy-policy'),
+                              child: Text('Privacy Policy',
+                                  style: GoogleFonts.beVietnamPro(
+                                    fontSize: 12,
+                                    color: AppColors.primary.withValues(alpha: 0.8),
+                                    fontWeight: FontWeight.w600,
+                                  )),
+                            ),
+                          ],
+                        ),
+                      ),
                       const SizedBox(height: 32),
                       Center(
                         child: Row(

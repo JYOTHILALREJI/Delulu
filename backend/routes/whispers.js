@@ -25,6 +25,7 @@ router.get('/connections', authMiddleware, async (req, res) => {
          p.online_status_enabled,
          p.last_seen_enabled,
          p.last_seen_at,
+         u.is_premium_user,
          latest.msg as last_message,
          latest.time as last_message_time,
          latest.mtype as last_message_type,
@@ -67,7 +68,8 @@ router.get('/connections', authMiddleware, async (req, res) => {
                     age: row.age,
                     photos: parseJson(row.photos),
                     is_online: isOnline,
-                    last_seen: lastSeen
+                    last_seen: lastSeen,
+                    is_premium_user: row.is_premium_user
                 },
                 last_message: row.last_message_type === 'voice' 
                     ? 'Voice Message 🎤' 
@@ -419,7 +421,7 @@ router.get('/blocked', authMiddleware, async (req, res) => {
     try {
         const userId = req.userId;
         const result = await db.query(
-            `SELECT u.id, p.display_name, p.photos, b.created_at
+            `SELECT u.id, u.is_premium_user, p.display_name, p.photos, b.created_at
              FROM blocks b
              JOIN users u ON b.blocked_id = u.id
              JOIN profiles p ON p.user_id = u.id
@@ -439,6 +441,7 @@ router.get('/blocked', authMiddleware, async (req, res) => {
             return {
                 id: row.id,
                 display_name: row.display_name,
+                is_premium_user: row.is_premium_user,
                 photos: parseJson(row.photos),
                 blocked_at: row.created_at
             };

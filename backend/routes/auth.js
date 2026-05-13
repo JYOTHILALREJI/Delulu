@@ -34,7 +34,7 @@ router.post('/register', async (req, res) => {
     const hash = await bcrypt.hash(password, SALT_ROUNDS);
 
     const result = await db.query(
-      'INSERT INTO users (email, password_hash, display_name) VALUES ($1, $2, $3) RETURNING id, email, display_name, is_onboarded, created_at',
+      'INSERT INTO users (email, password_hash, display_name, terms_accepted_at, privacy_accepted_at) VALUES ($1, $2, $3, NOW(), NOW()) RETURNING id, email, display_name, is_onboarded, created_at',
       [email.toLowerCase(), hash, display_name || '']
     );
 
@@ -103,7 +103,7 @@ router.post('/login', async (req, res) => {
 router.get('/me', authMiddleware, async (req, res) => {
   try {
     const result = await db.query(
-      `SELECT u.id, u.email, u.display_name, u.is_onboarded, u.onboarding_step, u.created_at, u.is_verified,
+      `SELECT u.id, u.email, u.display_name, u.is_onboarded, u.onboarding_step, u.created_at, u.is_verified, u.is_premium_user,
               p.display_name AS profile_name, p.age, p.gender, p.interested_in, p.bio, p.interests, p.photos,
               p.online_status_enabled, p.typing_indicator_enabled, p.last_seen_enabled, p.read_receipt_enabled,
               p.latitude, p.longitude, p.live_location_enabled, p.location_name,
@@ -185,6 +185,7 @@ router.get('/me', authMiddleware, async (req, res) => {
         live_location_enabled: row.live_location_enabled,
         location_name: row.location_name,
         is_premium: row.is_premium,
+        is_premium_user: row.is_premium_user,
         last_attention_seeker_at: row.last_attention_seeker_at,
         subscription_plan: row.subscription_plan,
         subscription_expiry: row.subscription_expiry,

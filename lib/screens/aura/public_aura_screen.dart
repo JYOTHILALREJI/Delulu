@@ -525,6 +525,7 @@ class _PublicAuraScreenState extends State<PublicAuraScreen> {
 
   Widget _buildProfileHeader(String name, int age) {
     final bool isBlocked = _profile?['is_blocked'] == true;
+    final bool isPremiumUser = _profile?['is_premium_user'] == true;
     return Column(
       children: [
         Row(
@@ -542,6 +543,19 @@ class _PublicAuraScreenState extends State<PublicAuraScreen> {
                 overflow: TextOverflow.ellipsis,
               ),
             ),
+            if (isPremiumUser) ...[
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.all(4),
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [Color(0xFFFFD700), Color(0xFFFFA500)],
+                  ),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.workspace_premium, size: 14, color: Colors.black),
+              ),
+            ],
             if (isBlocked) ...[
               const SizedBox(width: 12),
               Container(

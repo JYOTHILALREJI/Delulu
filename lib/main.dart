@@ -5,6 +5,8 @@ import 'screens/auth/login_screen.dart';
 import 'screens/auth/signup_screen.dart';
 import 'screens/onboarding/onboarding_screen.dart';
 import 'screens/home/home_screen.dart';
+import 'screens/legal/privacy_policy_screen.dart';
+import 'screens/legal/terms_conditions_screen.dart';
 import 'components/verification_prompt_wrapper.dart';
 import 'components/game_invite_wrapper.dart';
 
@@ -58,6 +60,10 @@ class DeluluApp extends StatelessWidget {
             );
           case '/home':
             return MaterialPageRoute(builder: (_) => const HomeScreen());
+          case '/privacy-policy':
+            return MaterialPageRoute(builder: (_) => const PrivacyPolicyScreen());
+          case '/terms-and-conditions':
+            return MaterialPageRoute(builder: (_) => const TermsConditionsScreen());
           default:
             return MaterialPageRoute(
               builder: (_) => const Scaffold(

@@ -226,6 +226,19 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
                         const SizedBox(width: 4),
                         const Icon(Icons.verified, color: AppColors.secondaryContainer, size: 16),
                       ],
+                      if (user['is_premium_user'] == true) ...[
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.all(3),
+                          decoration: const BoxDecoration(
+                            gradient: LinearGradient(
+                              colors: [Color(0xFFFFD700), Color(0xFFFFA500)],
+                            ),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.workspace_premium, size: 10, color: Colors.black),
+                        ),
+                      ],
                     ],
                   ),
                   const SizedBox(height: 4),

@@ -15,6 +15,9 @@ async function initDb() {
         password_hash VARCHAR(255) NOT NULL,
         display_name VARCHAR(100) DEFAULT '',
         is_onboarded BOOLEAN DEFAULT FALSE,
+        terms_accepted_at TIMESTAMPTZ,
+        privacy_accepted_at TIMESTAMPTZ,
+        is_premium_user BOOLEAN DEFAULT FALSE,
         created_at TIMESTAMPTZ DEFAULT NOW()
       );
     `);
@@ -154,6 +157,9 @@ async function initDb() {
             ALTER TABLE users ADD COLUMN IF NOT EXISTS display_name VARCHAR(100) DEFAULT '';
             ALTER TABLE users ADD COLUMN IF NOT EXISTS is_verified BOOLEAN DEFAULT FALSE;
             ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarding_step INTEGER DEFAULT 0;
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS terms_accepted_at TIMESTAMPTZ;
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS privacy_accepted_at TIMESTAMPTZ;
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS is_premium_user BOOLEAN DEFAULT FALSE;
           `);
       console.log('  ✓ updated users table columns');
     } catch (e) { }

@@ -108,7 +108,7 @@ router.get('/feed', authMiddleware, async (req, res) => {
       SELECT
         u.id, u.is_verified, p.display_name, p.age, p.gender, p.interested_in, p.bio, p.interests, p.photos, 
         p.latitude, p.longitude, p.live_location_enabled, p.hide_location_enabled,
-        p.is_premium, p.premium_since, p.match_points, p.streak_count, p.likes_count,
+        p.is_premium, u.is_premium_user, p.premium_since, p.match_points, p.streak_count, p.likes_count,
         COALESCE(${distFormula}, 0) as distance_miles,
         (SELECT COUNT(*) FROM connection_requests WHERE (sender_id = p.user_id OR receiver_id = p.user_id) AND status = 'accepted') as connect_count,
         EXISTS(SELECT 1 FROM likes WHERE liker_user_id = $1 AND liked_user_id = u.id) as is_liked,
@@ -173,7 +173,7 @@ router.get('/profile/:userId', authMiddleware, async (req, res) => {
 
     const result = await db.query(`
       SELECT
-        u.id, u.is_verified, p.display_name, p.age, p.gender, p.interested_in, p.bio, p.interests, p.photos, p.likes_count, p.hide_location_enabled,
+        u.id, u.is_verified, u.is_premium_user, p.display_name, p.age, p.gender, p.interested_in, p.bio, p.interests, p.photos, p.likes_count, p.hide_location_enabled,
         EXISTS(SELECT 1 FROM likes WHERE liker_user_id = $2 AND liked_user_id = u.id) as is_liked,
         EXISTS(SELECT 1 FROM blocks WHERE blocker_id = $2 AND blocked_id = u.id) as is_blocked,
         (SELECT status FROM connection_requests WHERE (sender_id = $2 AND receiver_id = u.id) OR (sender_id = u.id AND receiver_id = $2) ORDER BY (status = 'accepted') DESC, created_at DESC LIMIT 1) as request_status
@@ -259,7 +259,7 @@ router.get('/leaderboard', authMiddleware, async (req, res) => {
   try {
     const result = await db.query(`
       SELECT 
-        u.id, p.display_name, p.photos, p.likes_count, p.streak_count, p.popularity_score, u.is_verified
+        u.id, p.display_name, p.photos, p.likes_count, p.streak_count, p.popularity_score, u.is_verified, u.is_premium_user
       FROM profiles p
       JOIN users u ON p.user_id = u.id
       WHERE u.is_onboarded = TRUE

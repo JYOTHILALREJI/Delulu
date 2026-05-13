@@ -10,6 +10,7 @@ const requestsRoutes = require('./routes/requests');
 const whispersRoutes = require('./routes/whispers');
 const gamesRoutes = require('./routes/games');
 const premiumRoutes = require('./routes/premium');
+const legalRoutes = require('./routes/legal');
 
 const http = require('http');
 const socketManager = require('./socket');
@@ -701,6 +702,8 @@ app.use('/api/requests', requestsRoutes);
 app.use('/api/whispers', whispersRoutes);
 app.use('/api/games', gamesRoutes);
 app.use('/api/premium', premiumRoutes);
+app.use('/api/legal', legalRoutes);
+app.use('/legal', legalRoutes); // Publicly accessible without /api prefix
 
 // ── Health Check ──
 app.get('/api/health', (req, res) => {

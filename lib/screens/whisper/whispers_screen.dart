@@ -200,9 +200,29 @@ class WhispersScreenState extends State<WhispersScreen> {
                                       ),
                                   ],
                                 ),
-                                title: Text(
-                                  '${profile['display_name']}, ${profile['age']}',
-                                  style: GoogleFonts.beVietnamPro(fontSize: 16, fontWeight: FontWeight.w600, color: AppColors.onSurface),
+                                title: Row(
+                                  children: [
+                                    Flexible(
+                                      child: Text(
+                                        '${profile['display_name']}, ${profile['age']}',
+                                        style: GoogleFonts.beVietnamPro(fontSize: 16, fontWeight: FontWeight.w600, color: AppColors.onSurface),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                    if (profile['is_premium_user'] == true) ...[
+                                      const SizedBox(width: 6),
+                                      Container(
+                                        padding: const EdgeInsets.all(3),
+                                        decoration: const BoxDecoration(
+                                          gradient: LinearGradient(
+                                            colors: [Color(0xFFFFD700), Color(0xFFFFA500)],
+                                          ),
+                                          shape: BoxShape.circle,
+                                        ),
+                                        child: const Icon(Icons.workspace_premium, size: 10, color: Colors.black),
+                                      ),
+                                    ],
+                                  ],
                                 ),
                                 subtitle: _typingChannels[conn['channel_id']] == true
                                     ? Text(

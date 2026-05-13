@@ -18,6 +18,7 @@ class _SignupScreenState extends State<SignupScreen> {
   final _passwordController = TextEditingController();
   bool _obscurePassword = true;
   bool _isLoading = false;
+  bool _agreedToTerms = false;
 
   @override
   void dispose() {
@@ -29,6 +30,10 @@ class _SignupScreenState extends State<SignupScreen> {
 
   void _handleSignup() async {
     if (!_formKey.currentState!.validate()) return;
+    if (!_agreedToTerms) {
+      _showError('Please agree to the Terms & Privacy Policy');
+      return;
+    }
     setState(() => _isLoading = true);
 
     try {
@@ -234,8 +239,8 @@ class _SignupScreenState extends State<SignupScreen> {
                                   width: 18,
                                   height: 18,
                                   child: Checkbox(
-                                    value: true,
-                                    onChanged: (_) {},
+                                    value: _agreedToTerms,
+                                    onChanged: (v) => setState(() => _agreedToTerms = v ?? false),
                                     activeColor: AppColors.primaryContainer,
                                     checkColor: Colors.white,
                                     side: const BorderSide(
@@ -257,7 +262,7 @@ class _SignupScreenState extends State<SignupScreen> {
                                             color: AppColors.onSurfaceVariant,
                                           )),
                                       GestureDetector(
-                                        onTap: () {},
+                                        onTap: () => Navigator.pushNamed(context, '/terms-and-conditions'),
                                         child: Text('Terms of Service',
                                             style: GoogleFonts.beVietnamPro(
                                               fontSize: 12,
@@ -271,7 +276,7 @@ class _SignupScreenState extends State<SignupScreen> {
                                             color: AppColors.onSurfaceVariant,
                                           )),
                                       GestureDetector(
-                                        onTap: () {},
+                                        onTap: () => Navigator.pushNamed(context, '/privacy-policy'),
                                         child: Text('Privacy Policy',
                                             style: GoogleFonts.beVietnamPro(
                                               fontSize: 12,

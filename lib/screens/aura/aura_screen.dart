@@ -459,16 +459,34 @@ class AuraScreenState extends State<AuraScreen> {
   Widget _buildProfileHeader(String name, int age) {
     return Column(
       children: [
-        Text(
-          '$name, $age',
-          style: GoogleFonts.beVietnamPro(
-            fontSize: 28,
-            fontWeight: FontWeight.w800,
-            color: Colors.white,
-            shadows: [
-              Shadow(color: Colors.black.withValues(alpha: 0.3), blurRadius: 8),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(
+              '$name, $age',
+              style: GoogleFonts.beVietnamPro(
+                fontSize: 28,
+                fontWeight: FontWeight.w800,
+                color: Colors.white,
+                shadows: [
+                  Shadow(color: Colors.black.withValues(alpha: 0.3), blurRadius: 8),
+                ],
+              ),
+            ),
+            if (_profile?['is_premium_user'] == true) ...[
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.all(4),
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [Color(0xFFFFD700), Color(0xFFFFA500)],
+                  ),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.workspace_premium, size: 14, color: Colors.black),
+              ),
             ],
-          ),
+          ],
         ),
       ],
     );

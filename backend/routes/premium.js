@@ -40,9 +40,13 @@ router.post('/verify', async (req, res) => {
             expiryDate.setFullYear(expiryDate.getFullYear() + 1);
         }
 
-        // 3. Update profile to is_premium = true
+        // 3. Update profile and user to is_premium = true
         await client.query(
             'UPDATE profiles SET is_premium = true, premium_since = COALESCE(premium_since, NOW()) WHERE user_id = $1',
+            [userId]
+        );
+        await client.query(
+            'UPDATE users SET is_premium_user = true WHERE id = $1',
             [userId]
         );
 
