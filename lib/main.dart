@@ -3,6 +3,7 @@ import 'theme/app_colors.dart';
 import 'screens/splash/splash_screen.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/auth/signup_screen.dart';
+import 'screens/auth/blocked_screen.dart';
 import 'screens/onboarding/onboarding_screen.dart';
 import 'screens/home/home_screen.dart';
 import 'screens/legal/privacy_policy_screen.dart';
@@ -60,6 +61,8 @@ class DeluluApp extends StatelessWidget {
             );
           case '/home':
             return MaterialPageRoute(builder: (_) => const HomeScreen());
+          case '/blocked':
+            return MaterialPageRoute(builder: (_) => const BlockedScreen());
           case '/privacy-policy':
             return MaterialPageRoute(builder: (_) => const PrivacyPolicyScreen());
           case '/terms-and-conditions':

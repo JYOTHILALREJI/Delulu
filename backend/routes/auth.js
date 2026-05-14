@@ -34,7 +34,7 @@ router.post('/register', async (req, res) => {
     const hash = await bcrypt.hash(password, SALT_ROUNDS);
 
     const result = await db.query(
-      'INSERT INTO users (email, password_hash, display_name, terms_accepted_at, privacy_accepted_at) VALUES ($1, $2, $3, NOW(), NOW()) RETURNING id, email, display_name, is_onboarded, created_at',
+      'INSERT INTO users (email, password_hash, display_name, terms_accepted_at, privacy_accepted_at) VALUES ($1, $2, $3, NOW(), NOW()) RETURNING id, email, display_name, is_onboarded, is_admin, is_blocked, created_at',
       [email.toLowerCase(), hash, display_name || '']
     );
 
@@ -62,7 +62,7 @@ router.post('/login', async (req, res) => {
     }
 
     const result = await db.query(
-      'SELECT id, email, password_hash, display_name, is_onboarded, onboarding_step FROM users WHERE email = $1',
+      'SELECT id, email, password_hash, display_name, is_onboarded, onboarding_step, is_admin, is_blocked FROM users WHERE email = $1',
       [email.toLowerCase()]
     );
 
@@ -91,6 +91,8 @@ router.post('/login', async (req, res) => {
         display_name: user.display_name,
         is_onboarded: user.is_onboarded,
         onboarding_step: user.onboarding_step,
+        is_admin: user.is_admin,
+        is_blocked: user.is_blocked,
       },
     });
   } catch (err) {
@@ -109,6 +111,7 @@ router.get('/me', authMiddleware, async (req, res) => {
               p.online_status_enabled, p.typing_indicator_enabled, p.last_seen_enabled, p.read_receipt_enabled,
               p.latitude, p.longitude, p.live_location_enabled, p.location_name, u.is_verified,
               p.is_premium, p.last_attention_seeker_at, p.e2e_encryption_enabled, p.hide_location_enabled,
+              u.is_admin, u.is_blocked,
               s.plan_id AS subscription_plan, s.expiry_date AS subscription_expiry
        FROM users u
        LEFT JOIN profiles p ON p.user_id = u.id
@@ -193,6 +196,8 @@ router.get('/me', authMiddleware, async (req, res) => {
         hide_location_enabled: row.hide_location_enabled,
         subscription_plan: row.subscription_plan,
         subscription_expiry: row.subscription_expiry,
+        is_admin: row.is_admin,
+        is_blocked: row.is_blocked,
         connect_count: connectCount,
         likes_count: likesCount,
         aura_score: auraScore

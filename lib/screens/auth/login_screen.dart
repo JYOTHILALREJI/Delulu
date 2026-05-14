@@ -40,8 +40,17 @@ class _LoginScreenState extends State<LoginScreen> {
         await ApiService.saveToken(body['token']);
         final isOnboarded = body['user']['is_onboarded'] ?? false;
         final displayName = body['user']['display_name'] ?? '';
+        final isBlocked = body['user']['is_blocked'] ?? false;
+        
         await ApiService.saveUserData(isOnboarded, displayName);
+        
         if (!mounted) return;
+        
+        if (isBlocked) {
+          Navigator.of(context).pushReplacementNamed('/blocked');
+          return;
+        }
+
         if (isOnboarded) {
           Navigator.of(context).pushReplacementNamed('/home');
         } else {

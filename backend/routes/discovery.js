@@ -120,6 +120,7 @@ router.get('/feed', authMiddleware, async (req, res) => {
       JOIN users u ON p.user_id = u.id
       WHERE u.id != $1
         AND u.is_onboarded = TRUE
+        AND u.is_blocked = FALSE
         ${genderFilter}
         ${ageFilter}
         ${interestsFilter}
@@ -179,7 +180,7 @@ router.get('/profile/:userId', authMiddleware, async (req, res) => {
         (SELECT status FROM connection_requests WHERE (sender_id = $2 AND receiver_id = u.id) OR (sender_id = u.id AND receiver_id = $2) ORDER BY (status = 'accepted') DESC, created_at DESC LIMIT 1) as request_status
       FROM profiles p
       JOIN users u ON p.user_id = u.id
-      WHERE u.id = $1
+      WHERE u.id = $1 AND u.is_blocked = FALSE
     `, [targetUserId, currentUserId]);
 
     if (result.rows.length === 0) {
@@ -262,7 +263,7 @@ router.get('/leaderboard', authMiddleware, async (req, res) => {
         u.id, p.display_name, p.photos, p.likes_count, p.streak_count, p.popularity_score, u.is_verified, u.is_premium_user
       FROM profiles p
       JOIN users u ON p.user_id = u.id
-      WHERE u.is_onboarded = TRUE
+      WHERE u.is_onboarded = TRUE AND u.is_blocked = FALSE
       ORDER BY p.popularity_score DESC, p.likes_count DESC
       LIMIT 50
     `);

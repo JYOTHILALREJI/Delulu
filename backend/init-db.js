@@ -18,6 +18,8 @@ async function initDb() {
         terms_accepted_at TIMESTAMPTZ,
         privacy_accepted_at TIMESTAMPTZ,
         is_premium_user BOOLEAN DEFAULT FALSE,
+        is_admin BOOLEAN DEFAULT FALSE,
+        is_blocked BOOLEAN DEFAULT FALSE,
         created_at TIMESTAMPTZ DEFAULT NOW()
       );
     `);
@@ -45,6 +47,7 @@ async function initDb() {
         last_attention_seeker_at TIMESTAMPTZ,
         last_seen_at TIMESTAMPTZ,
         likes_count INTEGER DEFAULT 0,
+        is_blocked BOOLEAN DEFAULT FALSE,
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
     `);
@@ -128,7 +131,8 @@ async function initDb() {
       { name: 'e2e_encryption_enabled', type: 'BOOLEAN DEFAULT FALSE' },
       { name: 'hide_location_enabled', type: 'BOOLEAN DEFAULT FALSE' },
       { name: 'premium_since', type: 'TIMESTAMPTZ' },
-      { name: 'match_points', type: 'INTEGER DEFAULT 0' }
+      { name: 'match_points', type: 'INTEGER DEFAULT 0' },
+      { name: 'is_blocked', type: 'BOOLEAN DEFAULT FALSE' }
     ];
 
     for (const col of profileColumns) {
@@ -143,7 +147,9 @@ async function initDb() {
     // User columns for attention seeker
     const userColumns = [
       { name: 'attention_seeker_last_used', type: 'TIMESTAMPTZ' },
-      { name: 'attention_seeker_free_used', type: 'BOOLEAN DEFAULT FALSE' }
+      { name: 'attention_seeker_free_used', type: 'BOOLEAN DEFAULT FALSE' },
+      { name: 'is_admin', type: 'BOOLEAN DEFAULT FALSE' },
+      { name: 'is_blocked', type: 'BOOLEAN DEFAULT FALSE' }
     ];
 
     for (const col of userColumns) {
