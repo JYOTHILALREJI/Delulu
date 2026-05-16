@@ -12,6 +12,8 @@ import '../../services/socket_service.dart';
 import 'edit_profile_screen.dart';
 import 'blocked_profiles_screen.dart';
 import '../premium/subscription_screen.dart';
+import '../premium/subscription_history_screen.dart';
+import 'customer_support_screen.dart';
 import '../../components/delulu_wavy_loader.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -38,6 +40,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   // App version
   String _appVersion = '';
+  bool _hasPayments = false;
 
   @override
   void initState() {
@@ -52,6 +55,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _isVerified = _profile['is_verified'] ?? false;
     _isPremium = _profile['is_premium'] ?? false;
     _loadAppVersion();
+    _checkPaymentHistory();
   }
 
   Future<void> _loadAppVersion() async {
@@ -60,6 +64,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (res.statusCode == 200) {
         final body = jsonDecode(res.body);
         setState(() => _appVersion = body['version'] ?? '1.0.0');
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _checkPaymentHistory() async {
+    try {
+      final res = await ApiService.getPaymentHistory();
+      if (res.statusCode == 200) {
+        final body = jsonDecode(res.body);
+        final List history = body['history'] ?? [];
+        if (mounted) {
+          setState(() => _hasPayments = history.isNotEmpty);
+        }
       }
     } catch (_) {}
   }
@@ -477,6 +494,32 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       label: 'Terms & Conditions',
                       onTap: () => Navigator.pushNamed(context, '/terms-and-conditions'),
                     ),
+                  ]),
+
+                  const SizedBox(height: 28),
+
+                  // ── Support ──
+                  _buildSectionLabel('HELP & SUPPORT'),
+                  _buildSettingsGroup([
+                    _buildNavTile(
+                      icon: Icons.help_outline_rounded,
+                      label: 'Customer Support',
+                      subtitle: 'Contact us via email for any queries',
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => const CustomerSupportScreen()),
+                      ),
+                    ),
+                    if (_hasPayments)
+                      _buildNavTile(
+                        icon: Icons.receipt_long_outlined,
+                        label: 'Subscription History',
+                        subtitle: 'View your past and active plans',
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (_) => const SubscriptionHistoryScreen()),
+                        ),
+                      ),
                   ]),
 
                   const SizedBox(height: 28),

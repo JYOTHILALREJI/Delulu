@@ -86,4 +86,19 @@ router.get('/user/:userId', authMiddleware, adminMiddleware, async (req, res) =>
     }
   });
 
+// ── Get Support Queries (Admin) ──
+router.get('/support-queries', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const result = await db.query(`
+      SELECT id, user_id, email, name, query, status, created_at
+      FROM support_queries
+      ORDER BY created_at DESC
+    `);
+    res.json({ queries: result.rows });
+  } catch (err) {
+    console.error('Fetch support queries error:', err);
+    res.status(500).json({ error: 'Failed to fetch support queries' });
+  }
+});
+
 module.exports = router;

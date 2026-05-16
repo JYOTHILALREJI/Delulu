@@ -426,6 +426,21 @@ async function initDb() {
     `);
     console.log('  ✓ subscriptions');
 
+    // Support Queries table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS support_queries (
+        id SERIAL PRIMARY KEY,
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        email VARCHAR(255) NOT NULL,
+        name VARCHAR(100) NOT NULL,
+        query TEXT NOT NULL,
+        status VARCHAR(20) DEFAULT 'pending',
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
+    console.log('  ✓ support_queries');
+
     // Seed Subscription Plans
     await client.query(`
       INSERT INTO subscription_plans (id, name, price_text, period_text, tag, savings_text, sort_order)

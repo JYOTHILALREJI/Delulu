@@ -12,6 +12,7 @@ const gamesRoutes = require('./routes/games');
 const premiumRoutes = require('./routes/premium');
 const legalRoutes = require('./routes/legal');
 const adminRoutes = require('./routes/admin');
+const supportRoutes = require('./routes/support');
 
 const http = require('http');
 const socketManager = require('./socket');
@@ -837,6 +838,7 @@ app.use('/api/games', gamesRoutes);
 app.use('/api/premium', premiumRoutes);
 app.use('/api/legal', legalRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/support', supportRoutes);
 app.use('/legal', legalRoutes); // Publicly accessible without /api prefix
 
 // ── Health Check ──

@@ -454,4 +454,23 @@ class ApiService {
     final streamedResponse = await request.send();
     return http.Response.fromStream(streamedResponse);
   }
+
+  static Future<http.Response> submitSupportQuery({
+    required String email,
+    required String name,
+    required String query,
+  }) async {
+    final headers = await authHeaders();
+    return _client
+        .post(
+          Uri.parse('$baseUrl/support/submit'),
+          headers: headers,
+          body: jsonEncode({
+            'email': email,
+            'name': name,
+            'query': query,
+          }),
+        )
+        .timeout(_timeout);
+  }
 }
